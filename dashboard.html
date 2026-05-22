@@ -10,7 +10,7 @@
       background: #000a00;
       color: #00ff00;
       font-family: 'Courier New', monospace;
-      padding: 10px;
+      padding: 15px;
       overflow: hidden;
     }
     
@@ -18,37 +18,39 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       grid-template-rows: auto auto auto auto;
-      gap: 10px;
+      gap: 15px;
       height: 100vh;
       overflow: hidden;
     }
     
     .panel {
       border: 2px solid #003300;
-      border-radius: 5px;
-      padding: 10px;
+      border-radius: 8px;
+      padding: 15px;
       background: linear-gradient(135deg, #001a00 0%, #000a00 100%);
       overflow-y: auto;
-      font-size: 9px;
+      font-size: 11px;
+      min-height: 150px;
     }
     
     .panel-title {
       color: #00ff00;
       font-weight: bold;
-      margin-bottom: 8px;
-      padding-bottom: 5px;
-      border-bottom: 1px solid #003300;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #003300;
+      font-size: 13px;
     }
     
     .stat-row {
       display: flex;
       justify-content: space-between;
-      margin-bottom: 4px;
-      padding: 3px;
+      margin-bottom: 6px;
+      padding: 4px;
     }
     
-    .stat-label { color: #00aa00; }
-    .stat-value { color: #00ff00; font-weight: bold; }
+    .stat-label { color: #00aa00; font-size: 11px; }
+    .stat-value { color: #00ff00; font-weight: bold; font-size: 12px; }
     .stat-value.gain { color: #00ff00; }
     .stat-value.loss { color: #ff6666; }
     
@@ -86,26 +88,26 @@
     .position-item {
       background: #001a00;
       border: 1px solid #003300;
-      padding: 5px;
-      margin-bottom: 4px;
-      border-radius: 2px;
-      font-size: 8px;
+      padding: 8px;
+      margin-bottom: 6px;
+      border-radius: 3px;
+      font-size: 10px;
     }
     
-    .position-item.profit { border-left: 3px solid #00ff00; }
-    .position-item.loss { border-left: 3px solid #ff6666; }
+    .position-item.profit { border-left: 4px solid #00ff00; }
+    .position-item.loss { border-left: 4px solid #ff6666; }
     
     .trade-item {
       background: #001a00;
       border: 1px solid #003300;
-      padding: 5px;
-      margin-bottom: 4px;
-      border-radius: 2px;
-      font-size: 7px;
+      padding: 8px;
+      margin-bottom: 6px;
+      border-radius: 3px;
+      font-size: 9px;
     }
     
-    .trade-item.profit { border-left: 3px solid #00ff00; }
-    .trade-item.loss { border-left: 3px solid #ff6666; }
+    .trade-item.profit { border-left: 4px solid #00ff00; }
+    .trade-item.loss { border-left: 4px solid #ff6666; }
   </style>
 </head>
 <body>
@@ -114,10 +116,14 @@
   <!-- MARKET STATUS PANEL -->
   <div class="panel" id="market-status">
     <div class="panel-title">📍 MARKET STATUS</div>
-    <div id="market-display">--</div>
+    <div id="market-display" style="font-size: 12px; margin-bottom: 8px;">--</div>
     <div class="stat-row">
-      <span class="stat-label">Hours:</span>
+      <span class="stat-label">Trading Hours:</span>
       <span class="stat-value" id="market-hours">--</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Status:</span>
+      <span id="status-indicator" style="color: #666;">⏳ Waiting...</span>
     </div>
   </div>
  
@@ -129,7 +135,7 @@
       <span class="stat-value" id="cash-value">$0.00</span>
     </div>
     <div class="stat-row">
-      <span class="stat-label">POSITIONS:</span>
+      <span class="stat-label">POSITIONS VALUE:</span>
       <span class="stat-value" id="positions-value">$0.00</span>
     </div>
     <div class="stat-row">
@@ -137,12 +143,15 @@
       <span class="stat-value" id="total-value">$0.00</span>
     </div>
     <div class="stat-row">
-      <span class="stat-label">P&L:</span>
+      <span class="stat-label">PROFIT/LOSS:</span>
       <span class="stat-value" id="pnl-value">$0.00</span>
     </div>
     <div class="stat-row">
-      <span class="stat-label">RETURN:</span>
+      <span class="stat-label">RETURN %:</span>
       <span class="stat-value" id="return-value">0.00%</span>
+    </div>
+    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #003300; font-size: 9px; color: #666;">
+      Started with: $1,000 | Current: <span id="current-total">$0</span>
     </div>
   </div>
  
@@ -150,7 +159,7 @@
   <div class="panel" id="strategy-panel">
     <div class="panel-title">🧠 AI STRATEGY</div>
     <div class="stat-row">
-      <span class="stat-label">Strategy:</span>
+      <span class="stat-label">Strategy Mode:</span>
       <span class="stat-value" id="strategy-value">--</span>
     </div>
     <div class="stat-row">
@@ -162,7 +171,7 @@
       <span class="stat-value" id="win-rate-value">0%</span>
     </div>
     <div class="stat-row">
-      <span class="stat-label">Aggression:</span>
+      <span class="stat-label">Aggression Level:</span>
       <span class="stat-value" id="aggression-value">0%</span>
     </div>
   </div>
@@ -171,24 +180,24 @@
   <div class="panel" id="tracker-panel">
     <div class="panel-title" style="color: #ff4444;">🔴 LIVE TRADE TRACKER</div>
     <div class="stat-row">
-      <span class="stat-label">Total:</span>
+      <span class="stat-label">Total Trades:</span>
       <span class="stat-value" id="total-trades">0</span>
     </div>
     <div class="stat-row">
-      <span class="stat-label">Open:</span>
+      <span class="stat-label">Open Trades:</span>
       <span class="stat-value" id="open-trades">0</span>
     </div>
     <div class="stat-row">
-      <span class="stat-label">W/L:</span>
+      <span class="stat-label">Wins / Losses:</span>
       <span class="stat-value" id="wl-ratio">0/0</span>
     </div>
     <div class="stat-row">
-      <span class="stat-label">Win %:</span>
+      <span class="stat-label">Win Rate:</span>
       <span class="stat-value" id="win-percent">0%</span>
     </div>
-    <div style="margin-top: 8px; border-top: 1px solid #003300; padding-top: 5px;">
-      <div id="trades-list" style="max-height: 200px; overflow-y: auto;">
-        <div style="color: #666; text-align: center; padding: 20px;">⏳ Waiting for trades...</div>
+    <div style="margin-top: 10px; border-top: 1px solid #003300; padding-top: 8px;">
+      <div id="trades-list" style="max-height: 180px; overflow-y: auto;">
+        <div style="color: #666; text-align: center; padding: 30px; font-size: 10px;">⏳ Waiting for trades...</div>
       </div>
     </div>
   </div>
@@ -201,15 +210,15 @@
       <span class="stat-value" id="volatility-value">--</span>
     </div>
     <div class="stat-row">
-      <span class="stat-label">Trend:</span>
+      <span class="stat-label">Trend Direction:</span>
       <span class="stat-value" id="trend-value">--</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">Next Action:</span>
       <span class="stat-value" id="action-value">--</span>
     </div>
-    <div style="margin-top: 8px; padding-top: 5px;">
-      <div style="color: #666; font-size: 8px;" id="strategy-reason">--</div>
+    <div style="margin-top: 12px; padding-top: 8px; border-top: 1px solid #003300;">
+      <div style="color: #999; font-size: 10px;" id="strategy-reason">Waiting for market data...</div>
     </div>
   </div>
  
@@ -217,7 +226,7 @@
   <div class="panel" id="positions-panel">
     <div class="panel-title">📊 OPEN POSITIONS</div>
     <div id="positions-list" style="max-height: 400px; overflow-y: auto;">
-      <div style="color: #666; text-align: center; padding: 20px;">No open positions</div>
+      <div style="color: #666; text-align: center; padding: 50px; font-size: 10px;">No open positions</div>
     </div>
   </div>
 </div>
@@ -252,8 +261,11 @@ function updateDashboard(data) {
   document.getElementById('cash-value').textContent = '$' + cash.toFixed(2);
   document.getElementById('positions-value').textContent = '$' + positionsValue.toFixed(2);
   document.getElementById('total-value').textContent = '$' + totalValue.toFixed(2);
+  document.getElementById('current-total').textContent = '$' + totalValue.toFixed(0);
+  
   document.getElementById('pnl-value').textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
   document.getElementById('pnl-value').className = 'stat-value ' + (pnl >= 0 ? 'gain' : 'loss');
+  
   document.getElementById('return-value').textContent = (returnPercent >= 0 ? '+' : '') + returnPercent.toFixed(2) + '%';
   document.getElementById('return-value').className = 'stat-value ' + (returnPercent >= 0 ? 'gain' : 'loss');
  
@@ -261,13 +273,13 @@ function updateDashboard(data) {
   const market = data.currentMarket || 'CLOSED';
   const status = data.marketStatus || {};
   document.getElementById('market-display').textContent = market.toUpperCase();
-  document.getElementById('market-hours').textContent = status.openTime + ' - ' + status.closeTime || '--';
+  document.getElementById('market-hours').textContent = (status.openTime || '--') + ' - ' + (status.closeTime || '--');
  
   // AI STRATEGY
   const aiMetrics = data.aiMetrics || {};
   const aiReasoning = data.aiReasoning || {};
   
-  document.getElementById('strategy-value').textContent = (data.aiMetrics?.strategy || '--').toUpperCase();
+  document.getElementById('strategy-value').textContent = (aiMetrics.strategy || '--').toUpperCase();
   document.getElementById('confidence-value').textContent = (aiReasoning.confidence || '0%');
   document.getElementById('win-rate-value').textContent = (aiReasoning.winRate || '0%');
   document.getElementById('aggression-value').textContent = (aiMetrics.aggressionLevel || '0%');
@@ -296,7 +308,7 @@ function updateDashboard(data) {
   let tradesHtml = '';
   
   if (trades.length === 0) {
-    tradesHtml = '<div style="color: #666; text-align: center; padding: 20px;">⏳ Waiting for trades...</div>';
+    tradesHtml = '<div style="color: #666; text-align: center; padding: 30px; font-size: 10px;">⏳ Waiting for trades...</div>';
   } else {
     trades.forEach(trade => {
       const isProfit = (trade.unrealizedPnL || 0) >= 0;
@@ -307,8 +319,7 @@ function updateDashboard(data) {
         <div class="trade-item ${isProfit ? 'profit' : 'loss'}">
           <strong>${icon} ${trade.direction} ${trade.ticker}</strong> (${trade.size})<br>
           Entry: $${trade.entryPrice} → $${trade.currentPrice}<br>
-          <span style="color: ${isProfit ? '#00ff00' : '#ff6666'};">P&L: ${isProfit ? '+' : ''}$${pnlAmount}</span><br>
-          <span style="color: #999;">${trade.timeHeld}</span>
+          <span style="color: ${isProfit ? '#00ff00' : '#ff6666'};">P&L: ${isProfit ? '+' : ''}$${pnlAmount}</span>
         </div>
       `;
     });
@@ -320,7 +331,7 @@ function updateDashboard(data) {
   let positionsHtml = '';
   
   if (positions.length === 0) {
-    positionsHtml = '<div style="color: #666; text-align: center; padding: 20px;">No open positions</div>';
+    positionsHtml = '<div style="color: #666; text-align: center; padding: 50px; font-size: 10px;">No open positions</div>';
   } else {
     positions.forEach(pos => {
       const positionValue = (parseFloat(pos.currentPrice) - parseFloat(pos.entryPrice)) * pos.qty;
@@ -331,16 +342,14 @@ function updateDashboard(data) {
         <div class="position-item ${isProfit ? 'profit' : 'loss'}">
           <strong>${icon} ${pos.type} ${pos.ticker}</strong> (${pos.qty})<br>
           Entry: $${pos.entryPrice} | Current: $${pos.currentPrice}<br>
-          <span style="color: ${isProfit ? '#00ff00' : '#ff6666'};">
-            P&L: ${isProfit ? '+' : ''}$${positionValue.toFixed(2)}
-          </span>
+          <span style="color: ${isProfit ? '#00ff00' : '#ff6666'};">P&L: ${isProfit ? '+' : ''}$${positionValue.toFixed(2)}</span>
         </div>
       `;
     });
   }
   document.getElementById('positions-list').innerHTML = positionsHtml;
  
-  console.log('[DASHBOARD] Updated with:', {
+  console.log('[DASHBOARD] Updated:', {
     cash,
     totalValue,
     pnl,
