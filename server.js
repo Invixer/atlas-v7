@@ -677,24 +677,77 @@ function getPortfolioMetrics() {
     });
   });
   
-  const closes = portfolio.trades.filter(t => t.pnl);
-  const realizedPnL = closes.reduce((sum, t) => sum + (t.pnl || 0), 0);
-  const unrealizedPnL = positions.reduce((sum, p) => sum + parseFloat(p.pnl), 0);
-  const totalPnL = realizedPnL + unrealizedPnL;
-  
-  // Ensure numbers are valid
-  const validTotalPnL = isNaN(totalPnL) ? 0 : totalPnL;
+  // FIXED P&L CALCULATION - Simple and accurate
+  // P&L = Total Value - Starting Capital
+  const simpleTotalPnL = totalValue - START_CAPITAL;
+  const validTotalPnL = isNaN(simpleTotalPnL) ? 0 : simpleTotalPnL;
   const validReturn = isNaN(validTotalPnL / START_CAPITAL) ? 0 : (validTotalPnL / START_CAPITAL) * 100;
+  
+  // RECENT TRADES WITH REASONS AND P&L
+  const recentTrades = portfolio.trades.slice(-10).reverse().map(trade => {
+    const ticker = `${trade.market}:${trade.ticker}`;
+    const currentPrice = marketData[ticker]?.price || trade.price;
+    const entryPrice = trade.price;
+    
+    let pnl = 0;
+    if (trade.type === 'BUY_LONG' || trade.type === 'SELL_LONG') {
+      pnl = (currentPrice - entryPrice) * trade.qty;
+    } else if (trade.type === 'SELL_SHORT') {
+      pnl = (entryPrice - currentPrice) * trade.qty;
+    }
+    
+    const timeHeld = Math.round((Date.now() - new Date(trade.timestamp).getTime()) / (1000 * 60));
+    const direction = trade.type.includes('LONG') ? 'LONG' : 'SHORT';
+    
+    return {
+      id: trade.timestamp || Date.now(),
+      timestamp: trade.timestamp,
+      ticker: trade.ticker,
+      direction: direction,
+      size: trade.qty,
+      entryPrice: entryPrice.toFixed(2),
+      currentPrice: currentPrice.toFixed(2),
+      reason: trade.reason || 'Trade executed',
+      status: trade.type.includes('SELL') ? 'closed' : 'open',
+      realizedPnL: trade.type.includes('SELL') ? pnl : 0,
+      unrealizedPnL: trade.type.includes('SELL') ? 0 : pnl,
+      timeHeld: timeHeld + ' min'
+    };
+  });
+  
+  // TRADE STATISTICS
+  const totalTrades = portfolio.trades.length;
+  const wins = portfolio.trades.filter(t => {
+    const pnl = t.pnl || 0;
+    if (t.type === 'BUY_LONG' || t.type === 'SELL_SHORT') {
+      return ((t.price - t.price) > 0) || t.momentum > 0;
+    }
+    return pnl > 0;
+  }).length;
+  const losses = totalTrades - wins;
   
   return {
     cash: portfolio.cash.toFixed(2),
     totalValue: totalValue.toFixed(2),
-    realizedPnL: realizedPnL.toFixed(2),
-    unrealizedPnL: unrealizedPnL.toFixed(2),
-    totalPnL: validTotalPnL.toFixed(2),
-    return: validReturn.toFixed(2),
+    realizedPnL: (0).toFixed(2),  // Not tracking individually
+    unrealizedPnL: (0).toFixed(2),  // Not tracking individually
+    totalPnL: validTotalPnL.toFixed(2),  // THIS IS THE KEY FIX
+    return: validReturn.toFixed(2),  // THIS IS THE KEY FIX
     positions,
     trades: portfolio.trades.slice(-50),
+    
+    // RECENT TRADES WITH REASONS
+    recentTrades: recentTrades,
+    
+    // TRADE STATISTICS
+    stats: {
+      totalTrades: totalTrades,
+      openTrades: portfolio.trades.filter(t => !t.type.includes('SELL')).length,
+      closedTrades: portfolio.trades.filter(t => t.type.includes('SELL')).length,
+      wins: wins,
+      losses: losses,
+      winRate: totalTrades > 0 ? (wins / totalTrades) : 0
+    },
     
     // MARKET STATUS
     currentMarket: market || 'CLOSED',
