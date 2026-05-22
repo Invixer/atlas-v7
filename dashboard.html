@@ -603,3 +603,106 @@ connectWebSocket();
 </body>
 </html>
  
+  <!-- LIVE TRADE TRACKER PANEL (NEW!) -->
+  <div class="panel" id="tracker-panel" style="grid-column: 1 / -1; background: linear-gradient(135deg, #0a2a0a 0%, #051005 100%); border: 1px solid #003300;">
+    <div class="panel-title" style="color: #ff4444;">🔴 LIVE TRADE TRACKER</div>
+    
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+      <div class="stat-row">
+        <span class="stat-label">Total:</span>
+        <span class="stat-value" id="total-trades-tracker">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Open:</span>
+        <span class="stat-value" id="open-trades-tracker">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">W/L:</span>
+        <span class="stat-value" id="wl-tracker">0/0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Win Rate:</span>
+        <span class="stat-value gain" id="win-rate-tracker">0%</span>
+      </div>
+    </div>
+    
+    <div id="trades-container" style="max-height: 300px; overflow-y: auto; border: 1px solid #003300; border-radius: 4px; padding: 8px; background: #000a00;">
+      <div id="no-trades" style="color: #888; font-size: 8px; text-align: center; padding: 30px;">
+        ⏳ Waiting for first trade...
+      </div>
+      <div id="trades-list"></div>
+    </div>
+  </div>
+ 
+ 
+  <script>
+// UPDATE TRADE TRACKER
+function updateTradeTracker(data) {
+  const stats = data.stats || {};
+  const trades = data.recentTrades || [];
+  
+  // Update stats
+  document.getElementById('total-trades-tracker').textContent = stats.totalTrades || 0;
+  document.getElementById('open-trades-tracker').textContent = stats.openTrades || 0;
+  document.getElementById('wl-tracker').textContent = (stats.wins || 0) + '/' + (stats.losses || 0);
+  
+  const winRate = stats.totalTrades > 0 ? ((stats.wins / stats.totalTrades) * 100).toFixed(1) : '0';
+  document.getElementById('win-rate-tracker').textContent = winRate + '%';
+  
+  // Color win rate
+  const wrElement = document.getElementById('win-rate-tracker');
+  wrElement.className = 'stat-value ' + (parseFloat(winRate) >= 50 ? 'gain' : 'loss');
+  
+  // Render trades
+  const tradesList = document.getElementById('trades-list');
+  const noTrades = document.getElementById('no-trades');
+  
+  if (!trades || trades.length === 0) {
+    tradesList.innerHTML = '';
+    noTrades.style.display = 'block';
+    return;
+  }
+  
+  noTrades.style.display = 'none';
+  
+  let html = '';
+  trades.forEach((trade) => {
+    const isProfit = trade.unrealizedPnL >= 0;
+    const icon = trade.direction === 'LONG' ? '📈' : '📉';
+    const status = trade.status === 'open' ? '⏳ OPEN' : '✅ CLOSED';
+    const pnl = isProfit ? '+' : '';
+    const pnlValue = (trade.status === 'open' ? trade.unrealizedPnL : trade.realizedPnL).toFixed(2);
+    const pnlColor = isProfit ? '#00ff00' : '#ff6666';
+    const timeHeld = trade.timeHeld || '-- min';
+    
+    html += `
+      <div style="background: #001a00; border: 1px solid #003300; border-radius: 3px; padding: 6px; margin-bottom: 6px; font-size: 7px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+          <span><strong>${icon} ${trade.direction} ${trade.ticker} (${trade.size})</strong></span>
+          <span style="color: ${pnlColor}; font-weight: bold;">${pnl}$${pnlValue}</span>
+        </div>
+        <div style="color: #aaa; margin-bottom: 2px; font-size: 6px;">
+          Entry: $${trade.entryPrice} → Current: $${trade.currentPrice} | ${timeHeld}
+        </div>
+        <div style="color: #666; font-size: 6px; margin-bottom: 2px;">
+          📝 ${trade.reason}
+        </div>
+        <div style="color: #555; font-size: 6px;">
+          ${status}
+        </div>
+      </div>
+    `;
+  });
+  
+  tradesList.innerHTML = html;
+}
+ 
+// Call updateTradeTracker in the existing updateDashboard function
+const originalUpdateDashboard = updateDashboard;
+updateDashboard = function(data) {
+  originalUpdateDashboard.call(this, data);
+  updateTradeTracker(data);
+};
+  </script>
+ 
+ 
