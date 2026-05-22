@@ -660,6 +660,14 @@ function checkExits() {
 function getPortfolioMetrics() {
   const market = getCurrentMarket();
   const totalValue = getTotalValue();
+  
+  // DEBUG: Log trade count
+  console.log(`[PORTFOLIO_METRICS] Total trades in array: ${portfolio.trades.length}`);
+  if (portfolio.trades.length > 0) {
+    const lastTrade = portfolio.trades[portfolio.trades.length - 1];
+    console.log(`[PORTFOLIO_METRICS] Last trade:`, JSON.stringify(lastTrade));
+  }
+  
   const positions = [];
   
   Object.entries(portfolio.longPositions).forEach(([key, posArray]) => {
@@ -860,4 +868,3 @@ process.on('SIGINT', () => {
   saveData();
   process.exit(0);
 });
- 
