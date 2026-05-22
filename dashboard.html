@@ -14,7 +14,7 @@ body {
   overflow: hidden;
   line-height: 1.4;
 }
-
+ 
 .scanlines {
   position: fixed;
   top: 0;
@@ -25,7 +25,7 @@ body {
   pointer-events: none;
   z-index: 1000;
 }
-
+ 
 .container {
   display: grid;
   grid-template-columns: 0.8fr 1.2fr 0.8fr 1.2fr;
@@ -35,7 +35,7 @@ body {
   padding: 4px;
   background: #001100;
 }
-
+ 
 .header {
   grid-column: 1 / -1;
   background: #001100;
@@ -46,9 +46,9 @@ body {
   align-items: center;
   font-size: 11px;
 }
-
+ 
 .header h1 { letter-spacing: 2px; color: #00ff00; font-size: 12px; }
-
+ 
 .panel {
   background: #000;
   border: 1px solid #00aa00;
@@ -57,7 +57,7 @@ body {
   display: flex;
   flex-direction: column;
 }
-
+ 
 .panel-title {
   font-weight: bold;
   color: #00ff00;
@@ -66,26 +66,26 @@ body {
   padding-bottom: 2px;
   font-size: 9px;
 }
-
+ 
 .stat-row {
   display: flex;
   justify-content: space-between;
   margin: 2px 0;
   font-size: 9px;
 }
-
+ 
 .stat-label { color: #00aa00; flex: 1; }
 .stat-value { color: #00ff00; font-weight: bold; text-align: right; flex: 1; }
 .stat-value.gain { color: #00ff00; }
 .stat-value.loss { color: #ff6600; }
-
+ 
 /* MARKET STATUS PANEL */
 #market-panel {
   grid-column: 1;
   grid-row: 2;
   background: #001100;
 }
-
+ 
 .market-status {
   background: #000033;
   border: 2px solid #0099ff;
@@ -94,20 +94,20 @@ body {
   font-size: 10px;
   text-align: center;
 }
-
+ 
 .market-status.open { border-color: #00ff00; background: #001100; }
 .market-status.closed { border-color: #ff6600; background: #330011; }
-
+ 
 .market-name { color: #ffff00; font-weight: bold; font-size: 11px; }
 .market-time { color: #00aa00; font-size: 9px; margin-top: 2px; }
-
+ 
 /* AI STRATEGY PANEL */
 #strategy-panel {
   grid-column: 2;
   grid-row: 2;
   background: #001100;
 }
-
+ 
 .strategy-display {
   background: #000;
   border: 1px solid #00aa00;
@@ -115,38 +115,38 @@ body {
   margin: 4px 0;
   font-size: 9px;
 }
-
+ 
 .strategy-name {
   color: #ffff00;
   font-weight: bold;
   font-size: 11px;
   text-transform: uppercase;
 }
-
+ 
 .strategy-ultra-aggressive { color: #ff0000; }
 .strategy-aggressive { color: #ff6600; }
 .strategy-balanced { color: #00ff00; }
 .strategy-defensive { color: #0099ff; }
-
+ 
 .confidence-bar {
   background: #003300;
   height: 4px;
   margin-top: 2px;
   overflow: hidden;
 }
-
+ 
 .confidence-fill {
   height: 100%;
   background: #00ff00;
   transition: width 0.5s;
 }
-
+ 
 /* REASONING PANEL */
 #reasoning-panel {
   grid-column: 3;
   grid-row: 2;
 }
-
+ 
 .reasoning-item {
   background: #0a1a0a;
   border: 1px solid #003300;
@@ -154,17 +154,17 @@ body {
   margin: 2px 0;
   font-size: 8px;
 }
-
+ 
 .reasoning-label { color: #00aa00; }
 .reasoning-value { color: #ffff00; font-weight: bold; }
-
+ 
 /* RISK PANEL */
 #risk-panel {
   grid-column: 4;
   grid-row: 2;
   background: #1a0000;
 }
-
+ 
 .risk-metric {
   background: #0a0a0a;
   border: 1px solid #440000;
@@ -172,24 +172,24 @@ body {
   margin: 2px 0;
   font-size: 8px;
 }
-
+ 
 .risk-safe { border-color: #00aa00; color: #00aa00; }
 .risk-warning { border-color: #ff6600; color: #ff6600; }
 .risk-danger { border-color: #ff0000; color: #ff0000; }
-
+ 
 .risk-bar {
   background: #220000;
   height: 3px;
   margin-top: 2px;
   position: relative;
 }
-
+ 
 .risk-fill {
   height: 100%;
   background: #ff0000;
   transition: width 0.5s;
 }
-
+ 
 .risk-check {
   display: inline-block;
   margin: 1px 2px 1px 0;
@@ -199,22 +199,22 @@ body {
   color: #00aa00;
   font-size: 7px;
 }
-
+ 
 .risk-check.fail {
   background: #330000;
   border-color: #ff0000;
   color: #ff0000;
 }
-
+ 
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: #001100; }
 ::-webkit-scrollbar-thumb { background: #00aa00; }
 </style>
 </head>
 <body>
-
+ 
 <div class="scanlines"></div>
-
+ 
 <div class="container">
   <!-- HEADER -->
   <div class="header">
@@ -225,7 +225,7 @@ body {
       <span id="connection-status">CONNECTING...</span>
     </div>
   </div>
-
+ 
   <!-- MARKET STATUS PANEL -->
   <div class="panel" id="market-panel">
     <div class="panel-title">📍 MARKET STATUS</div>
@@ -234,7 +234,7 @@ body {
       <div class="market-name">MARKET CLOSED</div>
       <div class="market-time">Waiting for market open...</div>
     </div>
-
+ 
     <div style="margin-top: 8px; border-top: 1px solid #003300; padding-top: 4px;">
       <div class="stat-row">
         <span class="stat-label">Open Time:</span>
@@ -249,7 +249,7 @@ body {
         <span class="stat-value" id="next-market">--</span>
       </div>
     </div>
-
+ 
     <div style="margin-top: 8px; border-top: 1px solid #003300; padding-top: 4px;">
       <div class="panel-title" style="margin:0 0 4px 0; font-size:8px">💰 PORTFOLIO</div>
       <div class="stat-row">
@@ -270,7 +270,7 @@ body {
       </div>
     </div>
   </div>
-
+ 
   <!-- AI STRATEGY PANEL -->
   <div class="panel" id="strategy-panel">
     <div class="panel-title">🧠 AI STRATEGY (REAL-TIME)</div>
@@ -283,7 +283,7 @@ body {
       </div>
       <div style="color: #00aa00; font-size: 7px; margin-top: 2px;" id="confidence-text">Confidence: 70%</div>
     </div>
-
+ 
     <div style="margin-top: 6px; border-top: 1px solid #003300; padding-top: 4px;">
       <div class="panel-title" style="margin:0 0 4px 0; font-size:8px">📊 AI PARAMETERS</div>
       
@@ -308,7 +308,7 @@ body {
         <span class="stat-value" id="short-bias">40%</span>
       </div>
     </div>
-
+ 
     <div style="margin-top: 6px; border-top: 1px solid #003300; padding-top: 4px;">
       <div class="panel-title" style="margin:0 0 4px 0; font-size:8px">📈 RECENT STATS</div>
       
@@ -326,7 +326,7 @@ body {
       </div>
     </div>
   </div>
-
+ 
   <!-- REASONING PANEL -->
   <div class="panel" id="reasoning-panel">
     <div class="panel-title">💡 AI REASONING (WHY)</div>
@@ -335,22 +335,22 @@ body {
       <div class="reasoning-label">Win Rate:</div>
       <div class="reasoning-value" id="reason-win-rate">--</div>
     </div>
-
+ 
     <div class="reasoning-item">
       <div class="reasoning-label">Volatility (VIX):</div>
       <div class="reasoning-value" id="reason-volatility">--</div>
     </div>
-
+ 
     <div class="reasoning-item">
       <div class="reasoning-label">Market Trend:</div>
       <div class="reasoning-value" id="reason-trend">--</div>
     </div>
-
+ 
     <div class="reasoning-item">
       <div class="reasoning-label">Confidence:</div>
       <div class="reasoning-value" id="reason-confidence">--</div>
     </div>
-
+ 
     <div style="margin-top: 8px; border-top: 1px solid #003300; padding-top: 4px;">
       <div class="panel-title" style="margin:0 0 4px 0; font-size:8px">⚡ NEXT ACTION</div>
       <div class="reasoning-item" style="background: #000; border-color: #00aa00;">
@@ -359,7 +359,7 @@ body {
         </div>
       </div>
     </div>
-
+ 
     <div style="margin-top: 8px; border-top: 1px solid #003300; padding-top: 4px;">
       <div class="panel-title" style="margin:0 0 4px 0; font-size:8px">🎯 WHY THIS STRATEGY?</div>
       <div style="color: #00aa00; font-size: 8px; line-height: 1.3;" id="strategy-reason">
@@ -367,7 +367,7 @@ body {
       </div>
     </div>
   </div>
-
+ 
   <!-- RISK & SAFETY PANEL -->
   <div class="panel" id="risk-panel">
     <div class="panel-title">🛡️ RISK MANAGEMENT</div>
@@ -380,7 +380,7 @@ body {
       </div>
       <div style="font-size: 7px; color: #00aa00; margin-top: 1px;">Limit: 20% ✓</div>
     </div>
-
+ 
     <div class="risk-metric risk-safe">
       <div class="reasoning-label">Portfolio Heat:</div>
       <div class="reasoning-value" id="heat">0.0%</div>
@@ -389,13 +389,13 @@ body {
       </div>
       <div style="font-size: 7px; color: #00aa00; margin-top: 1px;">Limit: 50% ✓</div>
     </div>
-
+ 
     <div class="risk-metric risk-safe">
       <div class="reasoning-label">Daily Loss:</div>
       <div class="reasoning-value" id="daily-loss">$0.00</div>
       <div style="font-size: 7px; color: #00aa00; margin-top: 1px;">Limit: 5% ✓</div>
     </div>
-
+ 
     <div style="margin-top: 8px; border-top: 1px solid #440000; padding-top: 4px;">
       <div class="panel-title" style="margin:0 0 4px 0; font-size:8px; color: #ff6600;">✓ CHECKS PASSING</div>
       <div id="risk-checks" style="line-height: 1.6;">
@@ -404,7 +404,7 @@ body {
         <span class="risk-check">Daily ✓</span>
       </div>
     </div>
-
+ 
     <div style="margin-top: 8px; border-top: 1px solid #440000; padding-top: 4px;">
       <div class="panel-title" style="margin:0 0 4px 0; font-size:8px; color: #ff6600;">📊 POSITIONS</div>
       <div class="stat-row">
@@ -418,15 +418,15 @@ body {
     </div>
   </div>
 </div>
-
+ 
 <script>
 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 const host = window.location.host;
 const WS_URL = `${protocol}//${host}`;
-
+ 
 let ws = null;
 let startTime = Date.now();
-
+ 
 function connectWebSocket() {
   ws = new WebSocket(WS_URL);
   
@@ -458,30 +458,51 @@ function connectWebSocket() {
     setTimeout(connectWebSocket, 3000);
   };
 }
-
+ 
 function updateDashboard(data) {
   // Market Status
   const market = data.currentMarket;
   const marketStatus = data.marketStatus;
   
+  console.log('[DASHBOARD] Market:', market, 'Status:', marketStatus);
+  
   const statusEl = document.getElementById('market-status-display');
-  if (market === 'nasdaq' || market === 'jsx') {
+  
+  // Properly detect JSX market hours
+  const now = new Date();
+  const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const hours = estTime.getHours();
+  const isJSXOpen = (hours >= 19 || hours < 2);
+  
+  if (market === 'nasdaq') {
     statusEl.className = 'market-status open';
     statusEl.innerHTML = `
-      <div class="market-name">${market.toUpperCase()} OPEN 🟢</div>
-      <div class="market-time">${marketStatus.openTime} - ${marketStatus.closeTime}</div>
+      <div class="market-name">🟢 NASDAQ/NYSE OPEN</div>
+      <div class="market-time">9:30 AM - 4:00 PM EST</div>
+    `;
+  } else if (market === 'jsx' || isJSXOpen) {
+    statusEl.className = 'market-status open';
+    statusEl.innerHTML = `
+      <div class="market-name">🟢 JAPAN STOCK EXCHANGE OPEN</div>
+      <div class="market-time">7:00 PM EST (8:00 AM JST) - 2:00 AM EST (3:00 PM JST)</div>
+    `;
+  } else if (marketStatus && marketStatus.status && marketStatus.status.includes('CLOSED')) {
+    statusEl.className = 'market-status closed';
+    statusEl.innerHTML = `
+      <div class="market-name">⭕ MARKET CLOSED</div>
+      <div class="market-time">${marketStatus.reason || 'All markets closed'}</div>
     `;
   } else {
     statusEl.className = 'market-status closed';
     statusEl.innerHTML = `
-      <div class="market-name">MARKET CLOSED</div>
-      <div class="market-time">${marketStatus.reason || 'Waiting for market open'}</div>
+      <div class="market-name">⭕ AFTER HOURS</div>
+      <div class="market-time">Waiting for next market...</div>
     `;
   }
   
-  document.getElementById('open-time').textContent = marketStatus.openTime || '--';
-  document.getElementById('close-time').textContent = marketStatus.closeTime || '--';
-  document.getElementById('next-market').textContent = marketStatus.nextMarket || '--';
+  document.getElementById('open-time').textContent = marketStatus?.openTime || '--';
+  document.getElementById('close-time').textContent = marketStatus?.closeTime || '--';
+  document.getElementById('next-market').textContent = marketStatus?.nextMarket || '--';
   
   // Portfolio
   document.getElementById('cash').textContent = '$' + data.cash;
@@ -574,10 +595,11 @@ function updateDashboard(data) {
   
   document.getElementById('trades-count').textContent = `TRADES: ${data.trades.length}`;
 }
-
+ 
 console.log('[ATLAS v6] Dashboard loaded, connecting...');
 connectWebSocket();
 </script>
-
+ 
 </body>
 </html>
+ 
