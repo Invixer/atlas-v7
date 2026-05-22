@@ -385,14 +385,18 @@ function updateRiskMetrics() {
 function getTotalValue() {
   let value = portfolio.cash;
   Object.entries(portfolio.longPositions).forEach(([key, posArray]) => {
-    const price = marketData[key].price;
+    const marketEntry = marketData[key];
+    if (!marketEntry) return; // Skip if no market data
+    const price = marketEntry.price || 0;
     posArray.forEach(pos => value += price * pos.qty);
   });
   Object.entries(portfolio.shortPositions).forEach(([key, posArray]) => {
-    const price = marketData[key].price;
+    const marketEntry = marketData[key];
+    if (!marketEntry) return; // Skip if no market data
+    const price = marketEntry.price || 0;
     posArray.forEach(pos => value -= (price - pos.entryPrice) * pos.qty);
   });
-  return value;
+  return isNaN(value) ? portfolio.cash : value;
 }
  
 function evaluateStrategy() {
@@ -440,28 +444,74 @@ function evaluateStrategy() {
     const prevPrice = history[Math.max(0, history.length - 2)].price;
     const momentum = ((currentPrice - prevPrice) / prevPrice) * 100;
     
-    const threshold = 0.05 / (aiSystem.aggressionLevel || 0.5);
+    // ADAPTIVE THRESHOLD - Lower when trading is slow
+    let threshold = 0.05 / (aiSystem.aggressionLevel || 0.5);
+    const hourlyTrades = getHourlyTradeFrequency();
+    const expectedTrades = 3; // Should have ~3 trades per hour
+    
+    // If not enough recent trades, progressively lower threshold
+    if (hourlyTrades < expectedTrades) {
+      const multiplier = Math.max(0.2, hourlyTrades / expectedTrades);
+      threshold = threshold * multiplier;
+      if (hourlyTrades === 0) {
+        console.log(`[ADAPTIVE] No trades in last hour - threshold reduced to ${threshold.toFixed(5)}`);
+      }
+    }
+    
+    // ADAPTIVE SENTIMENT - Relax when trading is slow
+    let sentimentThreshold = 0.55;
+    if (hourlyTrades < 3) {
+      // If few trades: accept more neutral sentiment
+      sentimentThreshold = 0.40;
+    }
+    if (hourlyTrades === 0 && portfolio.trades.length < 10) {
+      // If NO trades and few total trades: be very aggressive
+      sentimentThreshold = 0.25;
+    }
+    
+    const sentiment = sentimentData.byMarket[market] || 0.5;
     
     // GO LONG
-    if (momentum > threshold && sentimentData.byMarket[market] > 0.55 && portfolio.cash > currentPrice * 2) {
+    if (momentum > threshold && sentiment > sentimentThreshold && portfolio.cash > currentPrice * 2) {
       if (Math.random() < aiSystem.longBias) {
         executeLong({
           market, ticker, price: currentPrice, momentum,
-          reason: `Momentum: ${momentum.toFixed(3)}% + Bullish sentiment`
+          reason: `Momentum: ${momentum.toFixed(3)}% + Sentiment: ${sentiment.toFixed(2)}`
         });
       }
     }
     
     // GO SHORT
-    if (momentum < -threshold && sentimentData.byMarket[market] < 0.45 && portfolio.cash > currentPrice * 2) {
+    if (momentum < -threshold && sentiment < (1 - sentimentThreshold) && portfolio.cash > currentPrice * 2) {
       if (Math.random() < aiSystem.shortBias) {
         executeShort({
           market, ticker, price: currentPrice, momentum,
-          reason: `Negative momentum + Bearish sentiment`
+          reason: `Negative momentum: ${momentum.toFixed(3)}% + Bearish sentiment: ${sentiment.toFixed(2)}`
         });
       }
     }
   });
+}
+ 
+// TRADE FREQUENCY TRACKING - For adaptive threshold adjustment
+function getRecentTradeFrequency() {
+  // Count trades in last 30 minutes
+  const now = Date.now();
+  const thirtyMinutesAgo = now - (30 * 60 * 1000);
+  const recentTrades = portfolio.trades.filter(t => 
+    new Date(t.timestamp).getTime() > thirtyMinutesAgo
+  );
+  return recentTrades.length;
+}
+ 
+function getHourlyTradeFrequency() {
+  // Count trades in last 60 minutes
+  const now = Date.now();
+  const oneHourAgo = now - (60 * 60 * 1000);
+  const recentTrades = portfolio.trades.filter(t => 
+    new Date(t.timestamp).getTime() > oneHourAgo
+  );
+  return recentTrades.length;
 }
  
 // FORCE INITIAL TRADE - Gets the bot trading to start learning
@@ -613,7 +663,10 @@ function getPortfolioMetrics() {
   const positions = [];
   
   Object.entries(portfolio.longPositions).forEach(([key, posArray]) => {
-    const price = marketData[key].price;
+    const marketEntry = marketData[key];
+    if (!marketEntry) return; // Skip if no market data
+    
+    const price = marketEntry.price || 0;
     posArray.forEach(pos => {
       positions.push({
         type: 'LONG', ticker: key.split(':')[1],
@@ -629,13 +682,17 @@ function getPortfolioMetrics() {
   const unrealizedPnL = positions.reduce((sum, p) => sum + parseFloat(p.pnl), 0);
   const totalPnL = realizedPnL + unrealizedPnL;
   
+  // Ensure numbers are valid
+  const validTotalPnL = isNaN(totalPnL) ? 0 : totalPnL;
+  const validReturn = isNaN(validTotalPnL / START_CAPITAL) ? 0 : (validTotalPnL / START_CAPITAL) * 100;
+  
   return {
     cash: portfolio.cash.toFixed(2),
     totalValue: totalValue.toFixed(2),
     realizedPnL: realizedPnL.toFixed(2),
     unrealizedPnL: unrealizedPnL.toFixed(2),
-    totalPnL: totalPnL.toFixed(2),
-    return: ((totalPnL / START_CAPITAL) * 100).toFixed(2),
+    totalPnL: validTotalPnL.toFixed(2),
+    return: validReturn.toFixed(2),
     positions,
     trades: portfolio.trades.slice(-50),
     
