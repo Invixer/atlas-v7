@@ -1,0 +1,12 @@
+node_modules/
+.env
+*.json.bak
+.DS_Store
+trading_data.json
+trading_ml.json
+trading_log.json
+backtest_results.json
+sentiment_data.json
+.git
+.vscode/
+*.log
