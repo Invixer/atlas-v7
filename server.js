@@ -418,6 +418,14 @@ function evaluateStrategy() {
     return; // Don't trade if risk limits exceeded
   }
   
+  // FORCE INITIAL TRADES - Get bot started if no trades exist
+  // This ensures the bot learns and starts generating real signals
+  if (portfolio.trades.length === 0) {
+    console.log('[FORCE_TRADE] No trades yet - forcing initial trades to start learning');
+    forceInitialTrade(market);
+    return;
+  }
+  
   const tickers = WATCHLISTS[market];
   
   tickers.forEach(ticker => {
@@ -454,6 +462,56 @@ function evaluateStrategy() {
       }
     }
   });
+}
+ 
+// FORCE INITIAL TRADE - Gets the bot trading to start learning
+function forceInitialTrade(market) {
+  const tickers = WATCHLISTS[market];
+  if (!tickers || tickers.length === 0) return;
+  
+  // Pick a random stock from the watchlist
+  const ticker = tickers[Math.floor(Math.random() * tickers.length)];
+  const key = `${market}:${ticker}`;
+  const data = marketData[key];
+  
+  if (!data || !data.price || data.price === 0) {
+    console.log(`[FORCE_TRADE] No price data for ${key} - waiting for data`);
+    return;
+  }
+  
+  const price = data.price;
+  
+  // Calculate position size - force at least 1 unit
+  const positionSize = Math.max(1, Math.floor((portfolio.cash * 0.3) / price));
+  
+  if (portfolio.cash < price) {
+    console.log(`[FORCE_TRADE] Insufficient cash ($${portfolio.cash}) for ${ticker} @ $${price}`);
+    return;
+  }
+  
+  // Random direction (long or short) - 60/40 bias for long
+  const isLong = Math.random() < 0.6;
+  const direction = isLong ? 'LONG' : 'SHORT';
+  
+  console.log(`[FORCE_TRADE] Starting with ${direction} ${positionSize}x ${ticker} @ $${price.toFixed(2)}`);
+  
+  if (isLong) {
+    executeLong({
+      market,
+      ticker,
+      price,
+      momentum: 0.1,
+      reason: 'Force initial trade - starting bot learning'
+    });
+  } else {
+    executeShort({
+      market,
+      ticker,
+      price,
+      momentum: -0.1,
+      reason: 'Force initial trade - starting bot learning'
+    });
+  }
 }
  
 function executeLong(setup) {
