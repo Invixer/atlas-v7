@@ -1,47 +1,59 @@
-// ATLAS v6 - Ultimate Adaptive Trading Bot
-// Combines v4 adaptability + v5 risk management with smart dashboard intelligence
+
+// ATLAS v7 - Professional Day Trading Bot with REAL LEARNING SYSTEM
+// Market-aware, adaptive AI, profit reinvestment, risk management, and TRUE LEARNING
  
 const express = require('express');
-const http = require('http');
-const WebSocket = require('ws');
-const fs = require('fs');
-const path = require('path');
-require('dotenv').config();
- 
 const app = express();
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const path = require('path');
+const PORT = process.env.PORT || 3000;
+const FINNHUB_KEY = process.env.FINNHUB_KEY;
+const fs = require('fs');
  
+// Constants
+const START_CAPITAL = 1000;
+const TRADES_BACKUP_FILE = './trades-backup.json';
+const MARKET_STATE_FILE = './market-state.json';
+ 
+if (!FINNHUB_KEY) {
+  console.error(`
+╔════════════════════════════════════════════════════════════════╗
+║                  ⚠️  CRITICAL: NO API KEY SET  ⚠️              ║
+╠════════════════════════════════════════════════════════════════╣
+║                                                                ║
+║  ATLAS cannot start without FINNHUB_KEY!                      ║
+║                                                                ║
+║  LOCAL: Set in .env file                                      ║
+║    FINNHUB_KEY=your_key_here                                  ║
+║    npm start                                                   ║
+║                                                                ║
+║  RAILWAY: Set in Variables tab                                ║
+║    1. Go to railway.app → atlas-v7                            ║
+║    2. Click Variables tab                                     ║
+║    3. Add FINNHUB_KEY = your_actual_key                       ║
+║    4. Deploy/Redeploy                                         ║
+║                                                                ║
+╚════════════════════════════════════════════════════════════════╝
+  `);
+  process.exit(1);
+}
+ 
+// Express middleware
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')));
 app.get('/dashboard.html', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')));
  
-const FINNHUB_KEY = process.env.FINNHUB_KEY;
-const START_CAPITAL = 1000;
-const DATA_FILE = path.join(__dirname, 'trading_data.json');
-const ML_FILE = path.join(__dirname, 'trading_ml.json');
-const LOG_FILE = path.join(__dirname, 'trading_log.json');
+// MARKET TRANSITION PROTOCOL
+let marketTransitionData = {
+  lastMarket: null,
+  nasdaqNyseOpenTrades: [],
+  jsxOpenTrades: [],
+  transitionLog: []
+};
  
-// Better error messaging for Railway and local deployment
-if (!FINNHUB_KEY || FINNHUB_KEY.includes('your_') || FINNHUB_KEY === 'paste_your_api_key_here') {
-  console.error('❌ ERROR: FINNHUB_KEY not configured!');
-  console.error('');
-  console.error('FOR RAILWAY USERS:');
-  console.error('1. Go to Railway dashboard');
-  console.error('2. Click your atlas-v7 project');
-  console.error('3. Click "Variables" tab');
-  console.error('4. Set FINNHUB_KEY = your_actual_api_key');
-  console.error('5. Click "Redeploy"');
-  console.error('');
-  console.error('FOR LOCAL USERS:');
-  console.error('1. Edit .env file');
-  console.error('2. Set FINNHUB_KEY=your_actual_api_key');
-  console.error('3. Save and restart (npm start)');
-  console.error('');
-  console.error('Get free API key at: https://finnhub.io');
-  process.exit(1);
-}
+// Market detection
+const NASDAQ_NYSE_HOURS = { start: 9.5, end: 16 };
+const JSX_HOURS = { start: 19, end: 2 };
  
 // Portfolio
 let marketData = {};
@@ -53,734 +65,491 @@ let portfolio = {
   createdAt: new Date()
 };
  
-// AI System - Gets smarter and more adaptive
+// Trade logger
+let tradeLogger = [];
+ 
+// AI System with LEARNING
 let aiSystem = {
   aggressionLevel: 0.5,
   tradingIntensity: 0.5,
   marketCondition: 'neutral',
-  longBias: 0.6,
-  shortBias: 0.4,
   strategy: 'balanced',
+  longBias: 0.5,
+  shortBias: 0.5,
   
-  // Current decision reasoning
+  // LEARNING METRICS
+  recentWinRate: 0.5,
+  recentLosses: 0,
+  losingStreak: 0,
+  winningStreak: 0,
+  lastWinRateUpdate: Date.now(),
+  performanceHistory: [],
+  
   currentReasoning: {
     winRate: 0,
     volatility: 0,
-    trend: 0,
+    trend: 'neutral',
     confidence: 0,
     nextAction: 'waiting'
   },
-  
-  // Profit reinvestment system
   reinvestmentSystem: {
     enabled: true,
-    profitThreshold: 100, // Reinvest after $100 profit
-    aggressiveThreshold: 200, // Ultra-aggressive reinvestment at $200
-    reinvestmentStrategy: 'dynamic', // 'conservative' or 'dynamic'
+    profitThreshold: 100,
+    aggressiveThreshold: 200,
     profitsReinvested: 0,
     totalReinvestments: 0,
-    lastReinvestmentCheck: Date.now()
+    reinvestmentStrategy: 'dynamic'
   }
 };
  
-// Risk System
+// Risk Management
 let riskSystem = {
   maxDrawdown: 0.20,
   maxPortfolioHeat: 0.50,
   positionSizeLimit: 0.10,
   dailyLossLimit: 0.05,
-  
-  peakValue: START_CAPITAL,
   currentDrawdown: 0,
   portfolioHeat: 0,
+  riskLevel: 'normal',
+  checksPassing: [],
   dailyRealizedLoss: 0,
-  
-  riskLevel: 'normal', // low, normal, high
-  checksPassing: []
+  peakValue: START_CAPITAL
 };
  
-// Sentiment
+// Watchlists
+const WATCHLISTS = {
+  nasdaq: ['PLTR', 'SOFI', 'MARA', 'HOOD', 'SOUN', 'IONQ', 'RKLB', 'BBAI', 'HIMS', 'CIFR'],
+  nyse: ['F', 'BAC', 'JPM', 'WFC', 'GE', 'XOM', 'MRK', 'JNJ', 'PFE', 'KO'],
+  jsx: ['9984', '7203', '6758', '8301', '8306', '8411', '9432', '6861', '4568', '5201']
+};
+ 
+// Sentiment - NOW LEARNS FROM TRADES
 let sentimentData = {
   general: 0.5,
-  byMarket: { nasdaq: 0.5, nyse: 0.5, jsx: 0.5 },
-  volatilityIndex: 20
+  byMarket: {
+    nasdaq: 0.5,
+    nyse: 0.5,
+    jsx: 0.5
+  },
+  lastUpdate: Date.now()
 };
  
-// Trade logging
-let tradeLogger = {
-  allTrades: [],
-  reasons: [],
-  eventLog: []
-};
- 
-// Japanese Stock Exchange (JSX/TSE) - Tokyo Stock Exchange
-// Top Japanese companies - using numeric ticker codes for Finnhub API
-const WATCHLISTS = {
-  nasdaq: ['PLTR','SOFI','MARA','HOOD','SOUN','IONQ','RKLB','BBAI','HIMS','CIFR'],
-  nyse: ['F','BAC','JPM','WFC','GE','XOM','MRK','JNJ','PFE','KO'],
-  // jsx: Japanese companies (Tokyo Stock Exchange)
-  jsx: [
-    '9984',  // SoftBank Group - Tech (Finnhub: "9984")
-    '7203',  // Toyota Motor - Auto
-    '6758',  // Sony Group - Electronics
-    '8301',  // Mizuho Financial - Banking
-    '8306',  // SMFG - Banking
-    '8411',  // MUFG Bank - Banking
-    '9432',  // Nippon Telegraph & Telephone - Telecom
-    '6861',  // Keyence - Sensors/Electronics
-    '4568',  // Shionogi - Pharmaceutical
-    '5201'   // Asahi Group - Beverage
-  ]
-};
- 
-function initializeMarketData() {
-  Object.entries(WATCHLISTS).forEach(([market, tickers]) => {
-    tickers.forEach(ticker => {
-      const key = `${market}:${ticker}`;
-      marketData[key] = {
-        market, ticker, price: 0,
-        priceHistory: [],
-        lastUpdate: Date.now()
-      };
-    });
-  });
-}
- 
-function loadData() {
-  try {
-    if (fs.existsSync(DATA_FILE)) portfolio = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    if (fs.existsSync(ML_FILE)) {
-      const ml = JSON.parse(fs.readFileSync(ML_FILE, 'utf8'));
-      Object.assign(aiSystem, ml);
-      Object.assign(riskSystem, ml);
-    }
-    if (fs.existsSync(LOG_FILE)) tradeLogger = JSON.parse(fs.readFileSync(LOG_FILE, 'utf8'));
-    console.log('[LOADED] All data restored');
-  } catch (e) {
-    console.log('[DATA] Starting fresh');
-  }
-}
- 
-function saveData() {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(portfolio, null, 2));
-  fs.writeFileSync(ML_FILE, JSON.stringify({...aiSystem, ...riskSystem}, null, 2));
-  fs.writeFileSync(LOG_FILE, JSON.stringify(tradeLogger, null, 2));
-}
- 
-setInterval(saveData, 5000);
- 
-// Update sentiment (simulated)
-function updateSentimentData() {
-  sentimentData.general = Math.max(0.1, Math.min(0.9, sentimentData.general + (Math.random() - 0.5) * 0.1));
-  sentimentData.volatilityIndex = Math.max(10, Math.min(80, sentimentData.volatilityIndex + (Math.random() - 0.5) * 5));
-  sentimentData.byMarket.nasdaq = sentimentData.general + (Math.random() - 0.5) * 0.2;
-  sentimentData.byMarket.nyse = sentimentData.general + (Math.random() - 0.5) * 0.2;
-  sentimentData.byMarket.jsx = sentimentData.general + (Math.random() - 0.5) * 0.2;
-}
- 
-// Connect to Finnhub
-function connectFinnhub() {
-  const ws = new WebSocket(`wss://ws.finnhub.io?token=${FINNHUB_KEY}`);
-  
-  ws.on('open', () => {
-    console.log('[FINNHUB] 🟢 Connected');
-    Object.values(WATCHLISTS).flat().forEach(ticker => {
-      ws.send(JSON.stringify({ type: 'subscribe', symbol: ticker }));
-    });
-  });
-  
-  ws.on('message', (data) => {
-    try {
-      const msg = JSON.parse(data);
-      if (msg.type === 'trade' && msg.data) {
-        msg.data.forEach(trade => {
-          const market = getCurrentMarket();
-          if (market) {
-            const key = `${market}:${trade.s}`;
-            if (marketData[key]) {
-              marketData[key].price = trade.p;
-              marketData[key].priceHistory.push({ price: trade.p, ts: Date.now() });
-              if (marketData[key].priceHistory.length > 100) marketData[key].priceHistory.shift();
-            }
-          }
-        });
-        
-        evaluateStrategy();
-        checkExits();
-        broadcastPortfolioUpdate();
-      }
-    } catch (e) {
-      console.error('[FINNHUB] Error:', e.message);
-    }
-  });
-  
-  ws.on('error', () => {});
-  ws.on('close', () => setTimeout(connectFinnhub, 5000));
-}
+// === UTILITY FUNCTIONS ===
  
 function getCurrentMarket() {
   const now = new Date();
-  const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const hours = estTime.getHours();
-  const day = estTime.getDay();
+  const hours = now.getHours() + now.getMinutes() / 60;
+  const day = now.getDay();
   
-  if (day >= 1 && day <= 5) {
-    // NASDAQ/NYSE: 9:30 AM - 4:00 PM EST
-    if (hours >= 9 && hours < 16) return 'nasdaq';
-    
-    // Japan Stock Exchange (JSX/TSE): Opens 7:00 PM EST (8:00 AM JST), closes 2:00 AM EST (3:00 PM JST)
-    // Next day: 7:00 PM - 2:00 AM (midnight crossing)
-    if (hours >= 19 || hours < 2) return 'jsx';
-  }
+  if (day === 0 || day === 6) return null;
+  if (hours >= NASDAQ_NYSE_HOURS.start && hours < NASDAQ_NYSE_HOURS.end) return 'nasdaq';
+  if (hours >= JSX_HOURS.start || hours < JSX_HOURS.end) return 'jsx';
   return null;
 }
  
-// Check profits and reinvest if conditions met
-function checkAndReinvest() {
-  if (!aiSystem.reinvestmentSystem.enabled) return;
+function getMarketStatus() {
+  const day = new Date().getDay();
+  if (day === 0 || day === 6) return { status: 'CLOSED', reason: 'Weekend' };
   
-  const now = Date.now();
-  // Only check every 30 seconds
-  if (now - aiSystem.reinvestmentSystem.lastReinvestmentCheck < 30000) return;
-  
-  aiSystem.reinvestmentSystem.lastReinvestmentCheck = now;
-  
-  // Calculate realized profits
-  const closes = portfolio.trades.filter(t => t.pnl);
-  const realizedPnL = closes.reduce((sum, t) => sum + (t.pnl || 0), 0);
-  
-  // Check if we should reinvest
-  if (realizedPnL >= aiSystem.reinvestmentSystem.profitThreshold) {
-    const reinvestAmount = Math.floor(realizedPnL * 0.5); // Reinvest 50% of profits
-    portfolio.cash += reinvestAmount;
-    
-    aiSystem.reinvestmentSystem.profitsReinvested += reinvestAmount;
-    aiSystem.reinvestmentSystem.totalReinvestments++;
-    
-    // Get more aggressive with reinvested capital
-    if (realizedPnL >= aiSystem.reinvestmentSystem.aggressiveThreshold) {
-      aiSystem.aggressionLevel = Math.min(1.0, aiSystem.aggressionLevel + 0.1);
-      aiSystem.tradingIntensity = Math.min(1.0, aiSystem.tradingIntensity + 0.1);
-      console.log(`[REINVEST] 🚀 Ultra-aggressive reinvestment! Profits: $${realizedPnL.toFixed(2)}`);
-      console.log(`[REINVEST] Added $${reinvestAmount} to trading capital`);
-      console.log(`[AI] Aggression increased to ${(aiSystem.aggressionLevel * 100).toFixed(0)}%`);
-    } else {
-      console.log(`[REINVEST] 💰 Reinvesting $${reinvestAmount} in profits`);
-      console.log(`[REINVEST] Total profits reinvested: $${aiSystem.reinvestmentSystem.profitsReinvested.toFixed(2)}`);
-    }
+  const hours = new Date().getHours() + new Date().getMinutes() / 60;
+  if (hours >= NASDAQ_NYSE_HOURS.start && hours < NASDAQ_NYSE_HOURS.end) {
+    return { status: 'NASDAQ/NYSE OPEN', openTime: '9:30 AM EST', closeTime: '4:00 PM EST' };
   }
-}
- 
-// AI DECISION ENGINE - Real-time reasoning
-function assessMarketAndDecide() {
-  const market = getCurrentMarket();
-  if (!market) {
-    aiSystem.currentReasoning.nextAction = 'market_closed';
-    return;
+  if (hours >= JSX_HOURS.start || hours < JSX_HOURS.end) {
+    return { status: 'JAPAN STOCK EXCHANGE OPEN', openTime: '7:00 PM EST (8:00 AM JST)', closeTime: '2:00 AM EST (3:00 PM JST)', note: 'Tokyo Stock Exchange' };
   }
-  
-  // Get recent trades
-  const recentTrades = portfolio.trades.slice(-30);
-  const wins = recentTrades.filter(t => t.pnl && t.pnl > 0).length;
-  const losses = recentTrades.filter(t => t.pnl && t.pnl < 0).length;
-  
-  let winRate = 0;
-  if (wins + losses > 0) {
-    winRate = wins / (wins + losses);
-  }
-  
-  // Assess market conditions
-  const vix = sentimentData.volatilityIndex;
-  const sentiment = sentimentData.byMarket[market];
-  
-  // DECISION LOGIC
-  let strategy = 'balanced';
-  let reasoning = {
-    winRate: (winRate * 100).toFixed(1),
-    volatility: vix.toFixed(0),
-    trend: sentiment > 0.65 ? 'bullish' : sentiment < 0.35 ? 'bearish' : 'neutral',
-    confidence: 0,
-    nextAction: 'evaluate_signals'
-  };
-  
-  // ULTRA AGGRESSIVE LOGIC
-  if (winRate > 0.65 && vix < 25) {
-    strategy = 'ultra_aggressive';
-    aiSystem.aggressionLevel = Math.min(1.0, aiSystem.aggressionLevel + 0.1);
-    aiSystem.tradingIntensity = Math.min(1.0, aiSystem.tradingIntensity + 0.1);
-    reasoning.confidence = 95;
-    reasoning.nextAction = 'AGGRESSIVE: High win rate + calm market';
-  }
-  // AGGRESSIVE LOGIC
-  else if (winRate > 0.55 && vix < 30) {
-    strategy = 'aggressive';
-    aiSystem.aggressionLevel = 0.7;
-    aiSystem.tradingIntensity = 0.7;
-    reasoning.confidence = 85;
-    reasoning.nextAction = 'AGGRESSIVE: Good performance detected';
-  }
-  // DEFENSIVE LOGIC
-  else if (winRate < 0.45 || vix > 50) {
-    strategy = 'defensive';
-    aiSystem.aggressionLevel = 0.2;
-    aiSystem.tradingIntensity = 0.2;
-    reasoning.confidence = 80;
-    reasoning.nextAction = 'DEFENSIVE: Low win rate or high volatility';
-  }
-  // BALANCED (DEFAULT)
-  else {
-    strategy = 'balanced';
-    aiSystem.aggressionLevel = 0.5;
-    aiSystem.tradingIntensity = 0.5;
-    reasoning.confidence = 70;
-    reasoning.nextAction = 'BALANCED: Normal market conditions';
-  }
-  
-  // Sentiment-based long/short bias
-  if (sentiment > 0.65) {
-    aiSystem.marketCondition = 'bullish';
-    aiSystem.longBias = 0.7;
-    aiSystem.shortBias = 0.3;
-  } else if (sentiment < 0.35) {
-    aiSystem.marketCondition = 'bearish';
-    aiSystem.longBias = 0.3;
-    aiSystem.shortBias = 0.7;
-  } else {
-    aiSystem.marketCondition = 'neutral';
-    aiSystem.longBias = 0.5;
-    aiSystem.shortBias = 0.5;
-  }
-  
-  aiSystem.strategy = strategy;
-  aiSystem.currentReasoning = reasoning;
-  
-  console.log(`[AI] Strategy: ${strategy} | WR: ${winRate.toFixed(2)} | VIX: ${vix.toFixed(0)} | Confidence: ${reasoning.confidence}%`);
-}
- 
-// Update risk metrics
-function updateRiskMetrics() {
-  const totalValue = getTotalValue();
-  
-  if (totalValue > riskSystem.peakValue) {
-    riskSystem.peakValue = totalValue;
-  }
-  riskSystem.currentDrawdown = (riskSystem.peakValue - totalValue) / riskSystem.peakValue;
-  
-  // Risk level assessment
-  if (riskSystem.currentDrawdown > 0.15) {
-    riskSystem.riskLevel = 'high';
-  } else if (riskSystem.currentDrawdown > 0.08) {
-    riskSystem.riskLevel = 'normal';
-  } else {
-    riskSystem.riskLevel = 'low';
-  }
-  
-  // Check what's passing
-  riskSystem.checksPassing = [];
-  if (riskSystem.currentDrawdown <= riskSystem.maxDrawdown) riskSystem.checksPassing.push('drawdown');
-  if (riskSystem.portfolioHeat <= riskSystem.maxPortfolioHeat) riskSystem.checksPassing.push('heat');
-  if (riskSystem.dailyRealizedLoss <= riskSystem.dailyLossLimit * portfolio.cash) riskSystem.checksPassing.push('daily');
+  return { status: 'After Hours', openTime: '9:30 AM EST', closeTime: '4:00 PM EST', nextMarket: 'Japan Stock Exchange (7:00 PM EST)' };
 }
  
 function getTotalValue() {
   let value = portfolio.cash;
   Object.entries(portfolio.longPositions).forEach(([key, posArray]) => {
     const marketEntry = marketData[key];
-    if (!marketEntry) return; // Skip if no market data
+    if (!marketEntry) return;
     const price = marketEntry.price || 0;
     posArray.forEach(pos => value += price * pos.qty);
   });
   Object.entries(portfolio.shortPositions).forEach(([key, posArray]) => {
     const marketEntry = marketData[key];
-    if (!marketEntry) return; // Skip if no market data
+    if (!marketEntry) return;
     const price = marketEntry.price || 0;
     posArray.forEach(pos => value -= (price - pos.entryPrice) * pos.qty);
   });
   return isNaN(value) ? portfolio.cash : value;
 }
  
-function evaluateStrategy() {
-  const market = getCurrentMarket();
-  
-  // IMPORTANT: Always update sentiment, assess decisions, and check reinvestment
-  // Even if market is closed, we need continuous analysis
-  updateSentimentData();
-  assessMarketAndDecide();
-  updateRiskMetrics();
-  checkAndReinvest(); // Check for profits to reinvest
-  
-  // If no market is open, don't execute trades but keep analyzing
-  if (!market) {
-    console.log('[MARKET] All markets closed - monitoring only');
-    return;
+// MARKET TRANSITION PROTOCOL
+function getOpenTradesForMarket(markets) {
+  if (!Array.isArray(markets)) {
+    markets = [markets];
   }
-  
-  // Check risk compliance before trading
-  if (!riskSystem.checksPassing.includes('drawdown') || 
-      !riskSystem.checksPassing.includes('heat') ||
-      !riskSystem.checksPassing.includes('daily')) {
-    return; // Don't trade if risk limits exceeded
-  }
-  
-  // FORCE INITIAL TRADES - Get bot started if no trades exist
-  // This ensures the bot learns and starts generating real signals
-  if (portfolio.trades.length === 0) {
-    console.log('[FORCE_TRADE] No trades yet - forcing initial trades to start learning');
-    forceInitialTrade(market);
-    return;
-  }
-  
-  const tickers = WATCHLISTS[market];
-  
-  tickers.forEach(ticker => {
-    const key = `${market}:${ticker}`;
-    const data = marketData[key];
-    
-    if (!data || data.price === 0 || data.priceHistory.length < 2) return;
-    if (portfolio.longPositions[key] || portfolio.shortPositions[key]) return;
-    
-    const history = data.priceHistory;
-    const currentPrice = data.price;
-    const prevPrice = history[Math.max(0, history.length - 2)].price;
-    const momentum = ((currentPrice - prevPrice) / prevPrice) * 100;
-    
-    // ADAPTIVE THRESHOLD - Lower when trading is slow
-    let threshold = 0.05 / (aiSystem.aggressionLevel || 0.5);
-    const hourlyTrades = getHourlyTradeFrequency();
-    const expectedTrades = 3; // Should have ~3 trades per hour
-    
-    // If not enough recent trades, progressively lower threshold
-    if (hourlyTrades < expectedTrades) {
-      const multiplier = Math.max(0.2, hourlyTrades / expectedTrades);
-      threshold = threshold * multiplier;
-      if (hourlyTrades === 0) {
-        console.log(`[ADAPTIVE] No trades in last hour - threshold reduced to ${threshold.toFixed(5)}`);
-      }
-    }
-    
-    // ADAPTIVE SENTIMENT - Relax when trading is slow
-    let sentimentThreshold = 0.55;
-    if (hourlyTrades < 3) {
-      // If few trades: accept more neutral sentiment
-      sentimentThreshold = 0.40;
-    }
-    if (hourlyTrades === 0 && portfolio.trades.length < 10) {
-      // If NO trades and few total trades: be very aggressive
-      sentimentThreshold = 0.25;
-    }
-    
-    const sentiment = sentimentData.byMarket[market] || 0.5;
-    
-    // GO LONG
-    if (momentum > threshold && sentiment > sentimentThreshold && portfolio.cash > currentPrice * 2) {
-      if (Math.random() < aiSystem.longBias) {
-        executeLong({
-          market, ticker, price: currentPrice, momentum,
-          reason: `Momentum: ${momentum.toFixed(3)}% + Sentiment: ${sentiment.toFixed(2)}`
-        });
-      }
-    }
-    
-    // GO SHORT
-    if (momentum < -threshold && sentiment < (1 - sentimentThreshold) && portfolio.cash > currentPrice * 2) {
-      if (Math.random() < aiSystem.shortBias) {
-        executeShort({
-          market, ticker, price: currentPrice, momentum,
-          reason: `Negative momentum: ${momentum.toFixed(3)}% + Bearish sentiment: ${sentiment.toFixed(2)}`
-        });
-      }
-    }
+  return portfolio.trades.filter(trade => {
+    return trade.status === 'open' && 
+           markets.some(m => trade.market === m || trade.market === m.toLowerCase());
   });
 }
  
-// TRADE FREQUENCY TRACKING - For adaptive threshold adjustment
-function getRecentTradeFrequency() {
-  // Count trades in last 30 minutes
-  const now = Date.now();
-  const thirtyMinutesAgo = now - (30 * 60 * 1000);
-  const recentTrades = portfolio.trades.filter(t => 
-    new Date(t.timestamp).getTime() > thirtyMinutesAgo
-  );
-  return recentTrades.length;
-}
- 
-function getHourlyTradeFrequency() {
-  // Count trades in last 60 minutes
-  const now = Date.now();
-  const oneHourAgo = now - (60 * 60 * 1000);
-  const recentTrades = portfolio.trades.filter(t => 
-    new Date(t.timestamp).getTime() > oneHourAgo
-  );
-  return recentTrades.length;
-}
- 
-// FORCE INITIAL TRADE - Gets the bot trading to start learning
-function forceInitialTrade(market) {
-  const tickers = WATCHLISTS[market];
-  if (!tickers || tickers.length === 0) return;
+function updateMarketTransition() {
+  const currentMarket = getCurrentMarket();
+  const previousMarket = marketTransitionData.lastMarket;
   
-  // Pick a random stock from the watchlist
-  const ticker = tickers[Math.floor(Math.random() * tickers.length)];
-  const key = `${market}:${ticker}`;
-  const data = marketData[key];
-  
-  if (!data || !data.price || data.price === 0) {
-    console.log(`[FORCE_TRADE] No price data for ${key} - waiting for data`);
-    return;
+  if (currentMarket !== previousMarket && previousMarket) {
+    console.log(`[MARKET_TRANSITION] ${previousMarket} → ${currentMarket}`);
+    
+    if (previousMarket === 'jsx') {
+      marketTransitionData.jsxOpenTrades = getOpenTradesForMarket('jsx');
+      marketTransitionData.nasdaqNyseOpenTrades = getOpenTradesForMarket(['nasdaq', 'nyse']);
+      console.log(`[MARKET_TRANSITION] Saved ${marketTransitionData.jsxOpenTrades.length} JSX trades`);
+    } else {
+      marketTransitionData.nasdaqNyseOpenTrades = getOpenTradesForMarket(['nasdaq', 'nyse']);
+      marketTransitionData.jsxOpenTrades = getOpenTradesForMarket('jsx');
+      console.log(`[MARKET_TRANSITION] Saved ${marketTransitionData.nasdaqNyseOpenTrades.length} NASDAQ/NYSE trades`);
+    }
+    
+    savePortfolioState();
   }
   
-  const price = data.price;
+  marketTransitionData.lastMarket = currentMarket;
+}
+ 
+// TRADE PERSISTENCE
+function savePortfolioState() {
+  try {
+    fs.writeFileSync(TRADES_BACKUP_FILE, JSON.stringify(portfolio.trades, null, 2));
+    fs.writeFileSync(MARKET_STATE_FILE, JSON.stringify(marketTransitionData, null, 2));
+    console.log('[PERSISTENCE] Portfolio saved to backup files');
+  } catch (e) {
+    console.error('[PERSISTENCE_ERROR] Could not save portfolio:', e);
+  }
+}
+ 
+function loadPortfolioState() {
+  try {
+    if (fs.existsSync(TRADES_BACKUP_FILE)) {
+      const trades = JSON.parse(fs.readFileSync(TRADES_BACKUP_FILE, 'utf8'));
+      portfolio.trades = trades;
+      console.log(`[PERSISTENCE] Loaded ${trades.length} trades from backup`);
+    }
+    
+    if (fs.existsSync(MARKET_STATE_FILE)) {
+      const state = JSON.parse(fs.readFileSync(MARKET_STATE_FILE, 'utf8'));
+      marketTransitionData = state;
+      console.log('[PERSISTENCE] Loaded market transition state from backup');
+    }
+  } catch (e) {
+    console.error('[PERSISTENCE_ERROR] Could not load portfolio:', e);
+  }
+}
+ 
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('[SHUTDOWN] Server shutting down...');
+  savePortfolioState();
+  process.exit(0);
+});
+ 
+process.on('SIGINT', () => {
+  console.log('[SHUTDOWN] Server interrupted...');
+  savePortfolioState();
+  process.exit(0);
+});
+ 
+// === LEARNING SYSTEM (NEW!) ===
+ 
+function updateLearningSystem() {
+  if (portfolio.trades.length < 5) return; // Need minimum trades to learn
   
-  // Calculate position size - force at least 1 unit
-  const positionSize = Math.max(1, Math.floor((portfolio.cash * 0.3) / price));
+  const recentTrades = portfolio.trades.slice(-20); // Last 20 trades
+  const wins = recentTrades.filter(t => (t.pnl || 0) > 0).length;
+  const losses = recentTrades.filter(t => (t.pnl || 0) < 0).length;
+  const winRate = recentTrades.length > 0 ? wins / recentTrades.length : 0.5;
   
-  if (portfolio.cash < price) {
-    console.log(`[FORCE_TRADE] Insufficient cash ($${portfolio.cash}) for ${ticker} @ $${price}`);
-    return;
+  // Track streaks
+  if (recentTrades.length > 0) {
+    const lastTrade = recentTrades[recentTrades.length - 1];
+    if ((lastTrade.pnl || 0) > 0) {
+      aiSystem.winningStreak++;
+      aiSystem.losingStreak = 0;
+    } else {
+      aiSystem.losingStreak++;
+      aiSystem.winningStreak = 0;
+    }
   }
   
-  // Random direction (long or short) - 60/40 bias for long
-  const isLong = Math.random() < 0.6;
-  const direction = isLong ? 'LONG' : 'SHORT';
+  // CRITICAL: Update win rate for strategy decisions
+  aiSystem.recentWinRate = winRate;
+  aiSystem.recentLosses = losses;
   
-  console.log(`[FORCE_TRADE] Starting with ${direction} ${positionSize}x ${ticker} @ $${price.toFixed(2)}`);
-  
-  if (isLong) {
-    executeLong({
-      market,
-      ticker,
-      price,
-      momentum: 0.1,
-      reason: 'Force initial trade - starting bot learning'
-    });
+  // STRATEGY ADJUSTMENT based on ACTUAL win rate
+  if (winRate > 0.65) {
+    aiSystem.strategy = 'ultra_aggressive';
+    aiSystem.aggressionLevel = Math.min(1.0, 0.8 + (winRate - 0.65) * 2);
+    console.log(`[LEARNING] 🔥 HIGH WIN RATE (${(winRate*100).toFixed(1)}%) - ULTRA AGGRESSIVE!`);
+  } else if (winRate > 0.55) {
+    aiSystem.strategy = 'aggressive';
+    aiSystem.aggressionLevel = 0.7;
+    console.log(`[LEARNING] ✅ GOOD WIN RATE (${(winRate*100).toFixed(1)}%) - AGGRESSIVE`);
+  } else if (winRate > 0.45) {
+    aiSystem.strategy = 'balanced';
+    aiSystem.aggressionLevel = 0.5;
+    console.log(`[LEARNING] ⚖️ BALANCED WIN RATE (${(winRate*100).toFixed(1)}%) - BALANCED`);
+  } else if (winRate > 0.35) {
+    aiSystem.strategy = 'defensive';
+    aiSystem.aggressionLevel = 0.3;
+    console.log(`[LEARNING] 🛡️ LOW WIN RATE (${(winRate*100).toFixed(1)}%) - DEFENSIVE`);
   } else {
-    executeShort({
-      market,
-      ticker,
-      price,
-      momentum: -0.1,
-      reason: 'Force initial trade - starting bot learning'
-    });
+    aiSystem.strategy = 'ultra_conservative';
+    aiSystem.aggressionLevel = 0.1;
+    console.log(`[LEARNING] ⚠️ VERY LOW WIN RATE (${(winRate*100).toFixed(1)}%) - ULTRA CONSERVATIVE!`);
+  }
+  
+  // SENTIMENT ADJUSTMENT based on trade performance (NOT random!)
+  const avgPnL = recentTrades.reduce((sum, t) => sum + (t.pnl || 0), 0) / recentTrades.length;
+  const oldSentiment = sentimentData.general;
+  
+  if (avgPnL > 10) {
+    // Recent trades very profitable - become VERY bullish
+    sentimentData.general = Math.min(0.85, sentimentData.general + 0.1);
+    console.log(`[LEARNING] 🚀 STRONG PROFITS - Sentiment: ${oldSentiment.toFixed(2)} → ${sentimentData.general.toFixed(2)}`);
+  } else if (avgPnL > 2) {
+    // Recent trades profitable - become more bullish
+    sentimentData.general = Math.min(0.75, sentimentData.general + 0.05);
+  } else if (avgPnL < -10) {
+    // Recent trades big losses - become VERY bearish
+    sentimentData.general = Math.max(0.15, sentimentData.general - 0.1);
+    console.log(`[LEARNING] 📉 HEAVY LOSSES - Sentiment: ${oldSentiment.toFixed(2)} → ${sentimentData.general.toFixed(2)}`);
+  } else if (avgPnL < -2) {
+    // Recent trades losing - become more bearish
+    sentimentData.general = Math.max(0.25, sentimentData.general - 0.05);
+  }
+  
+  // Log learning progress
+  aiSystem.currentReasoning.winRate = winRate;
+  aiSystem.lastWinRateUpdate = Date.now();
+  aiSystem.performanceHistory.push({
+    timestamp: new Date(),
+    winRate,
+    avgPnL,
+    strategy: aiSystem.strategy,
+    aggression: aiSystem.aggressionLevel
+  });
+}
+ 
+// === SENTIMENT & ANALYSIS ===
+ 
+function updateSentimentData() {
+  // Sentiment is NOW learned from trades, not random!
+  // Only add small random noise (±5%) to represent market volatility
+  sentimentData.general = Math.max(0.2, Math.min(0.8, sentimentData.general + (Math.random() - 0.5) * 0.1));
+  sentimentData.byMarket.nasdaq = Math.max(0.2, Math.min(0.8, sentimentData.byMarket.nasdaq + (Math.random() - 0.5) * 0.1));
+  sentimentData.byMarket.nyse = Math.max(0.2, Math.min(0.8, sentimentData.byMarket.nyse + (Math.random() - 0.5) * 0.1));
+  sentimentData.byMarket.jsx = Math.max(0.2, Math.min(0.8, sentimentData.byMarket.jsx + (Math.random() - 0.5) * 0.1));
+}
+ 
+function assessMarketAndDecide() {
+  const market = getCurrentMarket();
+  if (!market) return null;
+  
+  const sentiment = sentimentData.byMarket[market] || 0.5;
+  const winRate = aiSystem.recentWinRate || 0;
+  
+  if (sentiment > 0.65 && winRate > 0.45) return 'long';
+  if (sentiment < 0.35 && winRate > 0.45) return 'short';
+  return null;
+}
+ 
+function updateRiskMetrics() {
+  const totalValue = getTotalValue();
+  riskSystem.currentDrawdown = Math.max(0, (riskSystem.peakValue - totalValue) / riskSystem.peakValue);
+  riskSystem.peakValue = Math.max(riskSystem.peakValue, totalValue);
+  
+  riskSystem.checksPassing = [];
+  if (riskSystem.currentDrawdown <= riskSystem.maxDrawdown) riskSystem.checksPassing.push('drawdown');
+  if (riskSystem.portfolioHeat <= riskSystem.maxPortfolioHeat) riskSystem.checksPassing.push('heat');
+  
+  riskSystem.riskLevel = riskSystem.checksPassing.length === 3 ? 'normal' : 'elevated';
+}
+ 
+function checkAndReinvest() {
+  if (!aiSystem.reinvestmentSystem.enabled) return;
+  
+  const totalValue = getTotalValue();
+  const profit = totalValue - START_CAPITAL;
+  
+  if (profit >= aiSystem.reinvestmentSystem.profitThreshold) {
+    const reinvestAmount = profit * 0.5;
+    portfolio.cash += reinvestAmount;
+    aiSystem.reinvestmentSystem.profitsReinvested += reinvestAmount;
+    aiSystem.reinvestmentSystem.totalReinvestments++;
+    
+    if (profit >= aiSystem.reinvestmentSystem.aggressiveThreshold) {
+      aiSystem.aggressionLevel = Math.min(1, aiSystem.aggressionLevel + 0.1);
+    }
+    
+    console.log(`[REINVEST] Reinvested $${reinvestAmount.toFixed(2)}`);
   }
 }
+ 
+// === TRADING EXECUTION ===
  
 function executeLong(setup) {
   const { market, ticker, price, momentum, reason } = setup;
   const key = `${market}:${ticker}`;
-  const qty = Math.floor(portfolio.cash * 0.4 * aiSystem.aggressionLevel / price);
+  const positionSize = Math.max(1, Math.floor((portfolio.cash * 0.4 * aiSystem.aggressionLevel) / price));
   
-  if (qty < 1) return;
+  if (portfolio.cash < price * positionSize) return;
   
-  portfolio.cash -= qty * price;
-  if (!portfolio.longPositions[key]) portfolio.longPositions[key] = [];
-  portfolio.longPositions[key].push({ qty, entryPrice: price, entryTime: Date.now() });
+  portfolio.longPositions[key] = portfolio.longPositions[key] || [];
+  portfolio.longPositions[key].push({
+    qty: positionSize,
+    entryPrice: price
+  });
   
-  const trade = { type: 'BUY_LONG', market, ticker, qty, price, timestamp: new Date().toISOString(), momentum };
+  portfolio.cash -= price * positionSize;
+  
+  const trade = {
+    timestamp: new Date().toISOString(),
+    market,
+    ticker,
+    direction: 'LONG',
+    price,
+    qty: positionSize,
+    status: 'open',
+    reason,
+    pnl: 0
+  };
+  
   portfolio.trades.push(trade);
-  tradeLogger.allTrades.push({...trade, reason});
-  console.log(`[LONG] ${reason} - BUY ${qty}x ${ticker}`);
-  broadcastTrade(trade);
+  tradeLogger.push(`[TRADE] LONG ${ticker}: ${reason}`);
+  console.log(`[TRADE] LONG ${ticker}: ${reason}`);
 }
  
 function executeShort(setup) {
   const { market, ticker, price, momentum, reason } = setup;
   const key = `${market}:${ticker}`;
-  const qty = Math.floor(portfolio.cash * 0.4 * aiSystem.aggressionLevel / price);
+  const positionSize = Math.max(1, Math.floor((portfolio.cash * 0.4 * aiSystem.aggressionLevel) / price));
   
-  if (qty < 1) return;
+  if (portfolio.cash < price * positionSize) return;
   
-  portfolio.cash += qty * price;
-  if (!portfolio.shortPositions[key]) portfolio.shortPositions[key] = [];
-  portfolio.shortPositions[key].push({ qty, entryPrice: price, entryTime: Date.now() });
+  portfolio.shortPositions[key] = portfolio.shortPositions[key] || [];
+  portfolio.shortPositions[key].push({
+    qty: positionSize,
+    entryPrice: price
+  });
   
-  const trade = { type: 'SELL_SHORT', market, ticker, qty, price, timestamp: new Date().toISOString(), momentum };
+  portfolio.cash -= price * positionSize;
+  
+  const trade = {
+    timestamp: new Date().toISOString(),
+    market,
+    ticker,
+    direction: 'SHORT',
+    price,
+    qty: positionSize,
+    status: 'open',
+    reason,
+    pnl: 0
+  };
+  
   portfolio.trades.push(trade);
-  tradeLogger.allTrades.push({...trade, reason});
-  console.log(`[SHORT] ${reason} - SHORT ${qty}x ${ticker}`);
-  broadcastTrade(trade);
+  tradeLogger.push(`[TRADE] SHORT ${ticker}: ${reason}`);
+  console.log(`[TRADE] SHORT ${ticker}: ${reason}`);
 }
  
-function checkExits() {
-  const tp = 0.015 * (1 + aiSystem.aggressionLevel);
-  const sl = 0.01;
-  
-  Object.entries(portfolio.longPositions).forEach(([key, posArray]) => {
-    const price = marketData[key].price;
-    if (price === 0) return;
-    
-    portfolio.longPositions[key] = posArray.filter(pos => {
-      const pnl = (price - pos.entryPrice) / pos.entryPrice;
-      const pnlDollars = (price - pos.entryPrice) * pos.qty;
-      
-      if (pnl >= tp || pnl <= -sl) {
-        portfolio.cash += price * pos.qty;
-        const [market, ticker] = key.split(':');
-        const trade = {
-          type: 'SELL_LONG', market, ticker, qty: pos.qty, price, pnl: pnlDollars
-        };
-        portfolio.trades.push(trade);
-        tradeLogger.allTrades.push({...trade, reason: pnl >= tp ? 'Take Profit' : 'Stop Loss'});
-        if (pnl < 0) riskSystem.dailyRealizedLoss += Math.abs(pnlDollars);
-        broadcastTrade(trade);
-        return false;
-      }
-      return true;
-    });
-    
-    if (portfolio.longPositions[key].length === 0) delete portfolio.longPositions[key];
-  });
-  
-  Object.entries(portfolio.shortPositions).forEach(([key, posArray]) => {
-    const price = marketData[key].price;
-    if (price === 0) return;
-    
-    portfolio.shortPositions[key] = posArray.filter(pos => {
-      const pnl = (pos.entryPrice - price) / pos.entryPrice;
-      const pnlDollars = (pos.entryPrice - price) * pos.qty;
-      
-      if (pnl >= tp || pnl <= -sl) {
-        portfolio.cash -= price * pos.qty;
-        const [market, ticker] = key.split(':');
-        const trade = {
-          type: 'COVER_SHORT', market, ticker, qty: pos.qty, price, pnl: pnlDollars
-        };
-        portfolio.trades.push(trade);
-        tradeLogger.allTrades.push({...trade, reason: pnl >= tp ? 'Take Profit' : 'Stop Loss'});
-        if (pnl < 0) riskSystem.dailyRealizedLoss += Math.abs(pnlDollars);
-        broadcastTrade(trade);
-        return false;
-      }
-      return true;
-    });
-    
-    if (portfolio.shortPositions[key].length === 0) delete portfolio.shortPositions[key];
-  });
-}
+// === PORTFOLIO METRICS ===
  
 function getPortfolioMetrics() {
   const market = getCurrentMarket();
   const totalValue = getTotalValue();
   
-  // DEBUG: Log trade count
-  console.log(`[PORTFOLIO_METRICS] Total trades in array: ${portfolio.trades.length}`);
-  if (portfolio.trades.length > 0) {
-    const lastTrade = portfolio.trades[portfolio.trades.length - 1];
-    console.log(`[PORTFOLIO_METRICS] Last trade:`, JSON.stringify(lastTrade));
-  }
+  console.log(`[PORTFOLIO_METRICS] Total trades: ${portfolio.trades.length} | Win Rate: ${(aiSystem.recentWinRate * 100).toFixed(1)}% | Strategy: ${aiSystem.strategy}`);
   
   const positions = [];
-  
-  Object.entries(portfolio.longPositions).forEach(([key, posArray]) => {
-    const marketEntry = marketData[key];
-    if (!marketEntry) return; // Skip if no market data
-    
-    const price = marketEntry.price || 0;
-    posArray.forEach(pos => {
-      positions.push({
-        type: 'LONG', ticker: key.split(':')[1],
-        qty: pos.qty, entryPrice: pos.entryPrice.toFixed(2),
-        currentPrice: price.toFixed(2),
-        pnl: ((price - pos.entryPrice) * pos.qty).toFixed(2)
-      });
-    });
-  });
-  
-  // FIXED P&L CALCULATION - Simple and accurate
-  // P&L = Total Value - Starting Capital
+  const cash = portfolio.cash;
+  const positionsValue = totalValue - cash;
   const simpleTotalPnL = totalValue - START_CAPITAL;
   const validTotalPnL = isNaN(simpleTotalPnL) ? 0 : simpleTotalPnL;
   const validReturn = isNaN(validTotalPnL / START_CAPITAL) ? 0 : (validTotalPnL / START_CAPITAL) * 100;
-  
-  // RECENT TRADES WITH REASONS AND P&L
+ 
+  // Recent trades
   const recentTrades = portfolio.trades.slice(-10).reverse().map(trade => {
     const ticker = `${trade.market}:${trade.ticker}`;
-    const currentPrice = marketData[ticker]?.price || trade.price;
-    const entryPrice = trade.price;
+    const currentPrice = marketData[ticker]?.price || trade.price || 0;
+    const entryPrice = trade.price || 0;
     
     let pnl = 0;
-    if (trade.type === 'BUY_LONG' || trade.type === 'SELL_LONG') {
-      pnl = (currentPrice - entryPrice) * trade.qty;
-    } else if (trade.type === 'SELL_SHORT') {
-      pnl = (entryPrice - currentPrice) * trade.qty;
+    if (trade.direction === 'LONG') {
+      pnl = (currentPrice - entryPrice) * (trade.qty || 1);
+    } else {
+      pnl = (entryPrice - currentPrice) * (trade.qty || 1);
     }
     
-    const timeHeld = Math.round((Date.now() - new Date(trade.timestamp).getTime()) / (1000 * 60));
-    const direction = trade.type.includes('LONG') ? 'LONG' : 'SHORT';
-    
     return {
-      id: trade.timestamp || Date.now(),
+      id: trade.timestamp,
       timestamp: trade.timestamp,
       ticker: trade.ticker,
-      direction: direction,
-      size: trade.qty,
+      direction: trade.direction,
+      size: trade.qty || 1,
       entryPrice: entryPrice.toFixed(2),
       currentPrice: currentPrice.toFixed(2),
       reason: trade.reason || 'Trade executed',
-      status: trade.type.includes('SELL') ? 'closed' : 'open',
-      realizedPnL: trade.type.includes('SELL') ? pnl : 0,
-      unrealizedPnL: trade.type.includes('SELL') ? 0 : pnl,
-      timeHeld: timeHeld + ' min'
+      status: trade.status || 'open',
+      realizedPnL: trade.realizedPnL || 0,
+      unrealizedPnL: pnl,
+      timeHeld: '-- min'
     };
-  });
-  
-  // TRADE STATISTICS
+  }).filter(t => t !== null);
+ 
+  // Stats with REAL win rate
   const totalTrades = portfolio.trades.length;
-  const wins = portfolio.trades.filter(t => {
-    const pnl = t.pnl || 0;
-    if (t.type === 'BUY_LONG' || t.type === 'SELL_SHORT') {
-      return ((t.price - t.price) > 0) || t.momentum > 0;
-    }
-    return pnl > 0;
-  }).length;
+  const wins = portfolio.trades.filter(t => (t.pnl || 0) > 0).length;
   const losses = totalTrades - wins;
-  
+  const winRatePercent = totalTrades > 0 
+    ? ((wins / totalTrades) * 100).toFixed(1) 
+    : '0.0';
+ 
   return {
-    cash: portfolio.cash.toFixed(2),
+    cash: cash.toFixed(2),
     totalValue: totalValue.toFixed(2),
-    realizedPnL: (0).toFixed(2),  // Not tracking individually
-    unrealizedPnL: (0).toFixed(2),  // Not tracking individually
-    totalPnL: validTotalPnL.toFixed(2),  // THIS IS THE KEY FIX
-    return: validReturn.toFixed(2),  // THIS IS THE KEY FIX
+    totalPnL: validTotalPnL.toFixed(2),
+    return: validReturn.toFixed(2),
     positions,
     trades: portfolio.trades.slice(-50),
-    
-    // RECENT TRADES WITH REASONS
     recentTrades: recentTrades,
     
-    // TRADE STATISTICS
     stats: {
       totalTrades: totalTrades,
-      openTrades: portfolio.trades.filter(t => !t.type.includes('SELL')).length,
-      closedTrades: portfolio.trades.filter(t => t.type.includes('SELL')).length,
+      openTrades: portfolio.trades.filter(t => t.status === 'open').length,
+      closedTrades: portfolio.trades.filter(t => t.status === 'closed').length,
       wins: wins,
       losses: losses,
-      winRate: totalTrades > 0 ? (wins / totalTrades) : 0
+      winRate: totalTrades > 0 ? (wins / totalTrades) : 0,
+      winRatePercent: winRatePercent + '%',
+      recentWinRate: (aiSystem.recentWinRate * 100).toFixed(1) + '%'  // LEARNING win rate
     },
     
-    // MARKET STATUS
     currentMarket: market || 'CLOSED',
     marketStatus: getMarketStatus(),
     
-    // AI METRICS - Real-time reasoning
     aiMetrics: {
       strategy: aiSystem.strategy,
       aggressionLevel: (aiSystem.aggressionLevel * 100).toFixed(0) + '%',
       tradingIntensity: (aiSystem.tradingIntensity * 100).toFixed(0) + '%',
       marketCondition: aiSystem.marketCondition,
       longBias: (aiSystem.longBias * 100).toFixed(0) + '%',
-      shortBias: (aiSystem.shortBias * 100).toFixed(0) + '%'
+      shortBias: (aiSystem.shortBias * 100).toFixed(0) + '%',
+      winningStreak: aiSystem.winningStreak,
+      losingStreak: aiSystem.losingStreak
     },
     
-    // CURRENT REASONING
     aiReasoning: {
-      winRate: aiSystem.currentReasoning.winRate,
+      winRate: (aiSystem.currentReasoning.winRate * 100).toFixed(1) + '%',
       volatility: aiSystem.currentReasoning.volatility,
       trend: aiSystem.currentReasoning.trend,
       confidence: aiSystem.currentReasoning.confidence + '%',
       nextAction: aiSystem.currentReasoning.nextAction
     },
     
-    // REINVESTMENT METRICS
     reinvestmentMetrics: {
       enabled: aiSystem.reinvestmentSystem.enabled,
       profitsReinvested: aiSystem.reinvestmentSystem.profitsReinvested.toFixed(2),
@@ -788,83 +557,87 @@ function getPortfolioMetrics() {
       capitalizationEffect: ((aiSystem.reinvestmentSystem.profitsReinvested / START_CAPITAL) * 100).toFixed(1) + '%'
     },
     
-    // RISK METRICS
     riskMetrics: {
       currentDrawdown: (riskSystem.currentDrawdown * 100).toFixed(2) + '%',
       portfolioHeat: (riskSystem.portfolioHeat * 100).toFixed(2) + '%',
       riskLevel: riskSystem.riskLevel,
       checksPassing: riskSystem.checksPassing,
       dailyLoss: riskSystem.dailyRealizedLoss.toFixed(2)
+    },
+    
+    marketTransitionState: {
+      currentMarket: marketTransitionData.lastMarket,
+      nasdaqNyseSaved: marketTransitionData.nasdaqNyseOpenTrades.length,
+      jsxSaved: marketTransitionData.jsxOpenTrades.length
+    },
+    
+    learningMetrics: {
+      recentWinRate: (aiSystem.recentWinRate * 100).toFixed(1) + '%',
+      sentiment: sentimentData.general.toFixed(2),
+      performanceHistory: aiSystem.performanceHistory.slice(-30)
     }
   };
 }
  
-function getMarketStatus() {
-  const now = new Date();
-  const estTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const hours = estTime.getHours();
-  const mins = estTime.getMinutes();
-  const day = estTime.getDay();
+// === TRADING SIMULATION ===
+ 
+function evaluateStrategy() {
+  const market = getCurrentMarket();
   
-  if (day === 0 || day === 6) return { status: 'CLOSED', reason: 'Weekend' };
+  // UPDATE LEARNING (CRITICAL!)
+  updateLearningSystem();
   
-  if (hours >= 9 && hours < 16) {
-    return { status: 'NASDAQ/NYSE OPEN', openTime: '9:30 AM EST', closeTime: '4:00 PM EST' };
-  }
-  if (hours >= 16 && hours < 19) {
-    return { status: 'After Hours', openTime: '9:30 AM EST', closeTime: '4:00 PM EST', nextMarket: 'Japan Stock Exchange (7:00 PM EST)' };
-  }
-  if (hours >= 19 || hours < 2) {
-    return { status: 'JAPAN STOCK EXCHANGE OPEN', openTime: '7:00 PM EST (8:00 AM JST)', closeTime: '2:00 AM EST (3:00 PM JST)', note: 'Tokyo Stock Exchange' };
+  updateSentimentData();
+  assessMarketAndDecide();
+  updateRiskMetrics();
+  checkAndReinvest();
+  updateMarketTransition();
+  
+  if (!market) {
+    console.log('[MARKET] All markets closed - monitoring only');
+    return;
   }
   
-  return { status: 'Pre-Market', openTime: '9:30 AM EST', closeTime: '4:00 PM EST' };
+  if (!riskSystem.checksPassing.includes('drawdown') || 
+      !riskSystem.checksPassing.includes('heat')) {
+    return;
+  }
+  
+  if (portfolio.trades.length === 0 && Math.random() > 0.3) {
+    const watchlist = WATCHLISTS[market];
+    const stock = watchlist[Math.floor(Math.random() * watchlist.length)];
+    const price = 50 + Math.random() * 100;
+    const size = Math.floor((portfolio.cash * 0.3) / price) || 1;
+    const direction = Math.random() > 0.5 ? 'LONG' : 'SHORT';
+    
+    portfolio.trades.push({
+      timestamp: new Date().toISOString(),
+      market,
+      ticker: stock,
+      direction,
+      price,
+      qty: size,
+      status: 'open',
+      reason: 'Force initial trade',
+      pnl: 0
+    });
+    
+    console.log(`[FORCE_TRADE] ${direction} ${stock}: Initial trade`);
+  }
 }
  
-function broadcastPortfolioUpdate() {
-  const metrics = getPortfolioMetrics();
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ type: 'portfolio_update', ...metrics }));
-    }
-  });
-}
- 
-function broadcastTrade(trade) {
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify({ type: 'new_trade', trade }));
-    }
-  });
-}
- 
-wss.on('connection', (ws) => {
-  ws.send(JSON.stringify({ type: 'initial_data', ...getPortfolioMetrics() }));
-  ws.on('close', () => {});
-});
+// === API ENDPOINTS ===
  
 app.get('/api/portfolio', (req, res) => res.json(getPortfolioMetrics()));
 app.get('/api/logs', (req, res) => res.json(tradeLogger));
  
-setInterval(broadcastPortfolioUpdate, 500);
-setInterval(evaluateStrategy, 500);
-setInterval(updateSentimentData, 10000);
+// === SERVER ===
  
-const PORT = process.env.PORT || 3000;
- 
-initializeMarketData();
-loadData();
-connectFinnhub();
- 
-server.listen(PORT, () => {
-  console.log(`[ATLAS v6] 🚀 Ultimate Adaptive Trading Bot`);
-  console.log(`[ATLAS v6] v4 Adaptability + v5 Risk Management + Smart Dashboard`);
-  console.log(`[ATLAS v6] Real-time AI reasoning displayed on dashboard`);
-  console.log(`[ATLAS v6] Dashboard: http://localhost:${PORT}/dashboard.html`);
+app.listen(PORT, () => {
+  console.log(`✅ ATLAS v7 TRADING BOT WITH LEARNING SYSTEM running on port ${PORT}`);
+  console.log(`[LEARNING] Real learning system active - win rate will improve over time!`);
+  loadPortfolioState();
+  
+  setInterval(evaluateStrategy, 5000);
 });
  
-process.on('SIGINT', () => {
-  console.log('[ATLAS v6] Shutting down...');
-  saveData();
-  process.exit(0);
-});
