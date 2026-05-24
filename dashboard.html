@@ -300,8 +300,8 @@ function updateDashboard(data) {
   document.getElementById('total-trades').textContent = totalTrades;
   document.getElementById('open-trades').textContent = openTrades;
   document.getElementById('wl-ratio').textContent = wins + '/' + losses;
-  document.getElementById('win-percent').textContent = winPercent + '%';
-  document.getElementById('win-percent').className = 'stat-value ' + (parseFloat(winPercent) >= 50 ? 'gain' : 'loss');
+  document.getElementById('win-percent').textContent = (data.stats?.winRatePercent || '0.0%');
+  document.getElementById('win-percent').className = 'stat-value ' + (parseFloat(data.stats?.winRatePercent || '0') >= 50 ? 'gain' : 'loss');
  
   // RECENT TRADES LIST
   const trades = data.recentTrades || [];
