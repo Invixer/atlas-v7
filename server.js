@@ -1,4 +1,3 @@
-
 // ATLAS v7 - Professional Day Trading Bot with REAL LEARNING SYSTEM
 // Market-aware, adaptive AI, profit reinvestment, risk management, and TRUE LEARNING
  
@@ -607,22 +606,28 @@ function evaluateStrategy() {
     const watchlist = WATCHLISTS[market];
     const stock = watchlist[Math.floor(Math.random() * watchlist.length)];
     const price = 50 + Math.random() * 100;
-    const size = Math.floor((portfolio.cash * 0.3) / price) || 1;
     const direction = Math.random() > 0.5 ? 'LONG' : 'SHORT';
     
-    portfolio.trades.push({
-      timestamp: new Date().toISOString(),
-      market,
-      ticker: stock,
-      direction,
-      price,
-      qty: size,
-      status: 'open',
-      reason: 'Force initial trade',
-      pnl: 0
-    });
+    // CRITICAL FIX: Use proper executeShort/executeLong instead of creating trade directly!
+    if (direction === 'LONG') {
+      executeLong({
+        market,
+        ticker: stock,
+        price,
+        momentum: Math.random(),
+        reason: 'Force initial trade - starting bot learning'
+      });
+    } else {
+      executeShort({
+        market,
+        ticker: stock,
+        price,
+        momentum: Math.random(),
+        reason: 'Force initial trade - starting bot learning'
+      });
+    }
     
-    console.log(`[FORCE_TRADE] ${direction} ${stock}: Initial trade`);
+    console.log(`[FORCE_TRADE] ${direction} ${stock}: Position created with cash decrease`);
   }
 }
  
