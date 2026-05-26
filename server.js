@@ -69,8 +69,10 @@ let aiSystem = {
   recentWinRate: 0.5,
   winningStreak: 0,
   losingStreak: 0,
-  _lastCountedTradeTime: null,  // ADDED: Track last trade we counted for streaks
-  performanceHistory: [],       // ADDED (Bug #5): rolling record of recent performance
+  _lastCountedTradeTime: null,       // guards streak inflation
+  _lastSentimentUpdateTime: null,    // guards sentiment shift inflation
+  _lastPerfHistoryTime: null,        // guards performance history inflation
+  performanceHistory: [],
   currentReasoning: { winRate: 0, volatility: 0, trend: 'neutral', confidence: 0, nextAction: 'waiting' },
   reinvestmentSystem: { enabled: true, profitThreshold: 100, profitsReinvested: 0, totalReinvestments: 0 }
 };
@@ -151,6 +153,8 @@ function connectWebSocket() {
         msg.data.forEach(trade => {
           const symbol = trade.s;
           const price = trade.p;
+          // Guard: ignore malformed ticks with no valid price
+          if (!symbol || !Number.isFinite(price) || price <= 0) return;
           if (!marketData[symbol]) {
             // No REST data yet — prevClose temporarily equals price until REST fills it
             marketData[symbol] = { price, prevClose: price, high: price, low: price, lastUpdate: Date.now() };
@@ -189,10 +193,18 @@ function connectWebSocket() {
 function fetchQuote(symbol) {
   return new Promise((resolve) => {
     const url = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_KEY}`;
-    https.get(url, (res) => {
+    let resolved = false;
+ 
+    // BUG #4 FIX: capture the request handle so we can destroy() it on timeout.
+    // Without destroy(), the timed-out request keeps running: it still consumes
+    // a Finnhub rate-limit slot and leaks the response object.
+    const req = https.get(url, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
+        if (resolved) return;  // already timed out — discard
+        clearTimeout(timeoutHandle);
+        resolved = true;
         try {
           const json = JSON.parse(data);
           if (json.c && json.c > 0) {
@@ -200,45 +212,70 @@ function fetchQuote(symbol) {
           } else { resolve(null); }
         } catch (e) { resolve(null); }
       });
-    }).on('error', () => resolve(null));
+    });
+ 
+    req.on('error', () => {
+      if (resolved) return;
+      clearTimeout(timeoutHandle);
+      resolved = true;
+      resolve(null);
+    });
+ 
+    const timeoutHandle = setTimeout(() => {
+      if (resolved) return;
+      resolved = true;
+      req.destroy();  // abort the in-flight request
+      console.warn(`[PRICES] Timeout fetching ${symbol} — skipping`);
+      resolve(null);
+    }, 8000);
   });
 }
  
+let _fetchInProgress = false;
+ 
 async function fetchInitialPrices() {
-  // Fetch ALL symbols across all markets, not just the current one — otherwise
-  // stocks in closed markets have no real prevClose and produce 0% momentum.
-  const symbols = [...WATCHLISTS.nasdaq, ...WATCHLISTS.nyse, ...WATCHLISTS.jsx];
- 
-  // FIXED BUG #4: Finnhub free tier allows 60 calls/min. We fetch in batches of
-  // 5 (parallel) with a 5.5s gap between batches => 5 calls / 5.5s ≈ 54/min,
-  // safely under the limit. 30 symbols => 6 batches => ~28s total.
-  const BATCH_SIZE = 5;
-  const BATCH_GAP_MS = 5500;
- 
-  console.log(`[PRICES] Fetching initial prices for ${symbols.length} symbols (all markets, rate-limited batches)...`);
- 
-  for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
-    const batch = symbols.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(async (symbol) => {
-      const quote = await fetchQuote(symbol);
-      if (quote) {
-        // Merge: keep the latest live price if WS already populated it,
-        // but always take the real prevClose/high/low from REST.
-        const existing = marketData[symbol];
-        marketData[symbol] = {
-          price: existing?.price ?? quote.price,
-          prevClose: quote.prevClose,        // real previous-day close
-          high: quote.high,
-          low: quote.low,
-          lastUpdate: Date.now()
-        };
-      }
-    }));
-    if (i + BATCH_SIZE < symbols.length) {
-      await new Promise(r => setTimeout(r, BATCH_GAP_MS));
-    }
+  // FIX: Prevent concurrent runs. fetchInitialPrices takes ~28s. Without this
+  // guard the 6-hour interval could fire a second run before the first finishes,
+  // causing both to write to marketData in parallel with unpredictable results.
+  if (_fetchInProgress) {
+    console.log('[PRICES] Fetch already in progress — skipping this interval tick');
+    return;
   }
-  console.log(`[PRICES] ✓ Loaded ${Object.keys(marketData).length} initial prices`);
+  _fetchInProgress = true;
+ 
+  try {
+    // Fetch ALL symbols across all markets, not just the current one — otherwise
+    // stocks in closed markets have no real prevClose and produce 0% momentum.
+    const symbols = [...WATCHLISTS.nasdaq, ...WATCHLISTS.nyse, ...WATCHLISTS.jsx];
+ 
+    const BATCH_SIZE = 5;
+    const BATCH_GAP_MS = 5500;
+ 
+    console.log(`[PRICES] Fetching initial prices for ${symbols.length} symbols (all markets, rate-limited batches)...`);
+ 
+    for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
+      const batch = symbols.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(async (symbol) => {
+        const quote = await fetchQuote(symbol);
+        if (quote) {
+          const existing = marketData[symbol];
+          marketData[symbol] = {
+            price: existing?.price ?? quote.price,
+            prevClose: quote.prevClose,
+            high: quote.high,
+            low: quote.low,
+            lastUpdate: Date.now()
+          };
+        }
+      }));
+      if (i + BATCH_SIZE < symbols.length) {
+        await new Promise(r => setTimeout(r, BATCH_GAP_MS));
+      }
+    }
+    console.log(`[PRICES] ✓ Loaded ${Object.keys(marketData).length} initial prices`);
+  } finally {
+    _fetchInProgress = false;
+  }
 }
  
 // ─── UTILITY ────────────────────────────────────────────────────────────────
@@ -272,19 +309,34 @@ function getEasternTimeParts() {
  
 function getCurrentMarket() {
   const { hours, day } = getEasternTimeParts();
+ 
+  // JSX runs 7 PM EST → 2 AM EST, Mon–Fri Tokyo time.
+  // Valid Eastern windows: Sun 7 PM → Mon 2 AM, Mon 7 PM → Tue 2 AM, ... Fri 7 PM → Fri 2 AM (Sat not valid).
+  //
+  // FIXED BUG: The previous fix correctly blocked Saturday (day 6) but missed
+  // Sunday 12:00 AM–7:00 PM EST. That window is "hours < 2 AND day = 0" which
+  // is STILL Saturday night in Tokyo — JSX is closed.
+  // Guard: exclude Saturday entirely AND exclude the early-morning side of Sunday
+  // (midnight → 7 PM, i.e. before the Sunday evening session starts).
+  const isJSXHours = hours >= JSX_HOURS.start || hours < JSX_HOURS.end;
+  const isSundayEarlyMorning = day === 0 && hours < JSX_HOURS.start; // Sun 0:00–19:00
+  if (isJSXHours && day !== 6 && !isSundayEarlyMorning) return 'jsx';
+ 
   if (day === 0 || day === 6) return null;
   if (hours >= NASDAQ_NYSE_HOURS.start && hours < NASDAQ_NYSE_HOURS.end) return 'nasdaq';
-  if (hours >= JSX_HOURS.start || hours < JSX_HOURS.end) return 'jsx';
   return null;
 }
  
 function getMarketStatus() {
   const { hours, day } = getEasternTimeParts();
+  // Mirror getCurrentMarket exactly so dashboard status is never wrong
+  const isJSXHours = hours >= JSX_HOURS.start || hours < JSX_HOURS.end;
+  const isSundayEarlyMorning = day === 0 && hours < JSX_HOURS.start;
+  if (isJSXHours && day !== 6 && !isSundayEarlyMorning)
+    return { status: 'JSX OPEN', openTime: '7:00 PM EST', closeTime: '2:00 AM EST' };
   if (day === 0 || day === 6) return { status: 'CLOSED', reason: 'Weekend' };
   if (hours >= NASDAQ_NYSE_HOURS.start && hours < NASDAQ_NYSE_HOURS.end)
     return { status: 'NASDAQ/NYSE OPEN', openTime: '9:30 AM EST', closeTime: '4:00 PM EST' };
-  if (hours >= JSX_HOURS.start || hours < JSX_HOURS.end)
-    return { status: 'JSX OPEN', openTime: '7:00 PM EST', closeTime: '2:00 AM EST' };
   return { status: 'After Hours', openTime: '9:30 AM EST', closeTime: '4:00 PM EST' };
 }
  
@@ -299,18 +351,17 @@ function getTotalValue() {
   Object.entries(portfolio.longPositions).forEach(([ticker, positions]) => {
     const price = marketData[ticker]?.price;
     positions.forEach(pos => {
-      const p = price || pos.entryPrice;  // fallback to cost basis
-      value += p * pos.qty;
+      const p = Number(price || pos.entryPrice) || 0;
+      value += p * (pos.qty || 0);
     });
   });
  
-  // For shorts, missing price means unrealized P&L is unknown — treat as 0
-  // (entry - entry), which leaves the reserved margin intact in `value`.
   Object.entries(portfolio.shortPositions).forEach(([ticker, positions]) => {
     const price = marketData[ticker]?.price;
     positions.forEach(pos => {
-      const p = price || pos.entryPrice;  // fallback => 0 unrealized P&L
-      value += (pos.entryPrice - p) * pos.qty;
+      const ep = Number(pos.entryPrice) || 0;
+      const p = Number(price || ep) || ep;
+      value += (ep - p) * (pos.qty || 0);
     });
   });
  
@@ -378,6 +429,13 @@ function closeLong(ticker) {
   const currentPrice = marketData[ticker]?.price;
   if (!currentPrice) return;
  
+  // BUG #1 FIX: Read the market from an open trade BEFORE the forEach below
+  // marks trades as 'closed'. Reading after mutation means status === 'open'
+  // matches nothing, and we fall back to null incorrectly.
+  const tradeOpenMarket = portfolio.trades.find(
+    t => t.ticker === ticker && t.direction === 'LONG' && t.status === 'open'
+  )?.market || null;
+ 
   let totalPnL = 0;
   positions.forEach(pos => {
     const pnl = (currentPrice - pos.entryPrice) * pos.qty;
@@ -385,8 +443,6 @@ function closeLong(ticker) {
     portfolio.cash += currentPrice * pos.qty;
   });
  
-  // FIXED BUG #3: Each open trade record gets ITS OWN per-trade P&L,
-  // computed from its own entryPrice and qty — not the combined totalPnL.
   portfolio.trades
     .filter(t => t.ticker === ticker && t.direction === 'LONG' && t.status === 'open')
     .forEach(t => {
@@ -397,17 +453,11 @@ function closeLong(ticker) {
       t.closedAt = new Date().toISOString();
     });
  
-  // Track daily realized loss for the daily loss limit
-  if (totalPnL < 0) {
-    riskSystem.dailyRealizedLoss += Math.abs(totalPnL);
-  }
+  if (totalPnL < 0) riskSystem.dailyRealizedLoss += Math.abs(totalPnL);
  
-  // Store a full-schema record in closedTrades so updateLearning and the API
-  // win-rate can read from the larger, authoritative closed-trade history.
   portfolio.closedTrades.push({
     ticker, direction: 'LONG', pnl: totalPnL,
-    // Keep these fields so closedTrades is usable as a learning source
-    realizedPnL: totalPnL, closedAt: new Date().toISOString(), market: getCurrentMarket()
+    realizedPnL: totalPnL, closedAt: new Date().toISOString(), market: tradeOpenMarket
   });
   if (portfolio.closedTrades.length > 500) portfolio.closedTrades = portfolio.closedTrades.slice(-500);
   delete portfolio.longPositions[ticker];
@@ -422,6 +472,11 @@ function closeShort(ticker) {
   const currentPrice = marketData[ticker]?.price;
   if (!currentPrice) return;
  
+  // BUG #1 FIX: Read market BEFORE mutation
+  const shortTradeOpenMarket = portfolio.trades.find(
+    t => t.ticker === ticker && t.direction === 'SHORT' && t.status === 'open'
+  )?.market || null;
+ 
   let totalPnL = 0;
   positions.forEach(pos => {
     const pnl = (pos.entryPrice - currentPrice) * pos.qty;
@@ -430,8 +485,6 @@ function closeShort(ticker) {
     portfolio.cash += marginHeld + pnl;
   });
  
-  // FIXED BUG #3: Each open trade record gets ITS OWN per-trade P&L,
-  // computed from its own entryPrice and qty — not the combined totalPnL.
   portfolio.trades
     .filter(t => t.ticker === ticker && t.direction === 'SHORT' && t.status === 'open')
     .forEach(t => {
@@ -442,14 +495,11 @@ function closeShort(ticker) {
       t.closedAt = new Date().toISOString();
     });
  
-  // Track daily realized loss for the daily loss limit
-  if (totalPnL < 0) {
-    riskSystem.dailyRealizedLoss += Math.abs(totalPnL);
-  }
+  if (totalPnL < 0) riskSystem.dailyRealizedLoss += Math.abs(totalPnL);
  
   portfolio.closedTrades.push({
     ticker, direction: 'SHORT', pnl: totalPnL,
-    realizedPnL: totalPnL, closedAt: new Date().toISOString(), market: getCurrentMarket()
+    realizedPnL: totalPnL, closedAt: new Date().toISOString(), market: shortTradeOpenMarket
   });
   if (portfolio.closedTrades.length > 500) portfolio.closedTrades = portfolio.closedTrades.slice(-500);
   delete portfolio.shortPositions[ticker];
@@ -488,11 +538,19 @@ function saveState() {
         winningStreak: aiSystem.winningStreak,
         losingStreak: aiSystem.losingStreak,
         _lastCountedTradeTime: aiSystem._lastCountedTradeTime,
-        performanceHistory: aiSystem.performanceHistory
+        _lastSentimentUpdateTime: aiSystem._lastSentimentUpdateTime,
+        _lastPerfHistoryTime: aiSystem._lastPerfHistoryTime,
+        performanceHistory: aiSystem.performanceHistory,
+        currentReasoning: { ...aiSystem.currentReasoning }
       },
       riskSystem: {
         dailyRealizedLoss: riskSystem.dailyRealizedLoss,
         peakValue: riskSystem.peakValue
+      },
+      // FIXED: persist learned sentiment so restarts don't lose bot's market knowledge
+      sentimentData: {
+        general: sentimentData.general,
+        byMarket: { ...sentimentData.byMarket }
       },
       savedAt: new Date().toISOString()
     };
@@ -542,11 +600,19 @@ function saveStateSync() {
         winningStreak: aiSystem.winningStreak,
         losingStreak: aiSystem.losingStreak,
         _lastCountedTradeTime: aiSystem._lastCountedTradeTime,
-        performanceHistory: aiSystem.performanceHistory
+        _lastSentimentUpdateTime: aiSystem._lastSentimentUpdateTime,
+        _lastPerfHistoryTime: aiSystem._lastPerfHistoryTime,
+        performanceHistory: aiSystem.performanceHistory,
+        currentReasoning: { ...aiSystem.currentReasoning }
       },
       riskSystem: {
         dailyRealizedLoss: riskSystem.dailyRealizedLoss,
         peakValue: riskSystem.peakValue
+      },
+      // FIXED: persist learned sentiment so restarts don't lose bot's market knowledge
+      sentimentData: {
+        general: sentimentData.general,
+        byMarket: { ...sentimentData.byMarket }
       },
       savedAt: new Date().toISOString()
     };
@@ -598,11 +664,27 @@ function loadState() {
       aiSystem.winningStreak = state.aiSystem.winningStreak ?? 0;
       aiSystem.losingStreak = state.aiSystem.losingStreak ?? 0;
       aiSystem._lastCountedTradeTime = state.aiSystem._lastCountedTradeTime ?? null;
+      aiSystem._lastSentimentUpdateTime = state.aiSystem._lastSentimentUpdateTime ?? null;
+      aiSystem._lastPerfHistoryTime = state.aiSystem._lastPerfHistoryTime ?? null;
       aiSystem.performanceHistory = state.aiSystem.performanceHistory ?? [];
+      if (state.aiSystem.currentReasoning) {
+        aiSystem.currentReasoning.winRate = state.aiSystem.currentReasoning.winRate ?? 0;
+        aiSystem.currentReasoning.volatility = state.aiSystem.currentReasoning.volatility ?? 0;
+        aiSystem.currentReasoning.trend = state.aiSystem.currentReasoning.trend ?? 'neutral';
+        aiSystem.currentReasoning.confidence = state.aiSystem.currentReasoning.confidence ?? 0;
+        aiSystem.currentReasoning.nextAction = state.aiSystem.currentReasoning.nextAction ?? 'waiting';
+      }
     }
     if (state.riskSystem) {
       riskSystem.dailyRealizedLoss = state.riskSystem.dailyRealizedLoss ?? 0;
       riskSystem.peakValue = state.riskSystem.peakValue ?? START_CAPITAL;
+    }
+    // FIXED: restore learned sentiment on restart
+    if (state.sentimentData) {
+      sentimentData.general = state.sentimentData.general ?? 0.5;
+      sentimentData.byMarket.nasdaq = state.sentimentData.byMarket?.nasdaq ?? 0.5;
+      sentimentData.byMarket.nyse = state.sentimentData.byMarket?.nyse ?? 0.5;
+      sentimentData.byMarket.jsx = state.sentimentData.byMarket?.jsx ?? 0.5;
     }
     console.log(`[LOAD] ✓ Restored: $${portfolio.cash.toFixed(2)} cash, ${portfolio.trades.length} trades, ${Object.keys(portfolio.longPositions).length} longs, ${Object.keys(portfolio.shortPositions).length} shorts`);
   } catch (e) {
@@ -621,6 +703,12 @@ function updateLearning() {
   // 200 closed entries and can fall below the 20-trade minimum when many are open.
   // Both sources now store .realizedPnL and .closedAt with the same schema.
   const closed = portfolio.closedTrades;
+ 
+  // Always update nextAction regardless of trade count so dashboard isn't stuck on 'waiting'
+  aiSystem.currentReasoning.nextAction = getCurrentMarket()
+    ? (closed.length < 3 ? 'collecting initial trades' : 'scanning for signals')
+    : 'waiting for market open';
+ 
   if (closed.length < 3) return;
  
   const recent = closed.slice(-20);
@@ -652,29 +740,49 @@ function updateLearning() {
  
   const avgPnL = recent.reduce((s, t) => s + t.realizedPnL, 0) / recent.length;
  
-  // FIXED BUG #6: Adjust per-market sentiment too, not just general.
-  // Trading signals read sentimentData.byMarket[market], so that's what must learn.
-  const currentMarket = getCurrentMarket();
+  // FIX (Reported #3 + Own #1): Only shift sentiment when a NEW trade closes.
+  // Without this guard, sentiment nudged ±0.03 every 10s on the same data,
+  // drifting to 0.8 or 0.2 within ~5 minutes of good/bad avgPnL.
   const sentimentShift = avgPnL > 5 ? 0.03 : (avgPnL < -5 ? -0.03 : 0);
-  if (sentimentShift !== 0) {
+  if (sentimentShift !== 0 && last.closedAt !== aiSystem._lastSentimentUpdateTime) {
+    aiSystem._lastSentimentUpdateTime = last.closedAt;
     sentimentData.general = Math.max(0.2, Math.min(0.8, sentimentData.general + sentimentShift));
-    if (currentMarket && sentimentData.byMarket[currentMarket] !== undefined) {
-      sentimentData.byMarket[currentMarket] = Math.max(0.2, Math.min(0.8,
-        sentimentData.byMarket[currentMarket] + sentimentShift));
+ 
+    const lastMarket = recent[recent.length - 1]?.market;
+    const targetMarket = lastMarket || getCurrentMarket();
+    if (targetMarket && sentimentData.byMarket[targetMarket] !== undefined) {
+      sentimentData.byMarket[targetMarket] = Math.max(0.2, Math.min(0.8,
+        sentimentData.byMarket[targetMarket] + sentimentShift));
     }
   }
  
-  // FIXED BUG #5: Record performance history (rolling window of 50 entries)
-  aiSystem.performanceHistory.push({
-    timestamp: Date.now(),
-    winRate,
-    avgPnL,
-    strategy: aiSystem.strategy,
-    aggression: aiSystem.aggressionLevel
-  });
-  if (aiSystem.performanceHistory.length > 50) {
-    aiSystem.performanceHistory.shift();
+  // FIX (Own #3): Only push to performanceHistory when a NEW trade closes —
+  // otherwise 50 identical entries fill the window in ~8 minutes.
+  if (last.closedAt !== aiSystem._lastPerfHistoryTime) {
+    aiSystem._lastPerfHistoryTime = last.closedAt;
+    aiSystem.performanceHistory.push({
+      timestamp: Date.now(),
+      winRate,
+      avgPnL,
+      strategy: aiSystem.strategy,
+      aggression: aiSystem.aggressionLevel
+    });
+    if (aiSystem.performanceHistory.length > 50) {
+      aiSystem.performanceHistory.shift();
+    }
   }
+ 
+  // FIX (Own #4 #5 #6): Populate currentReasoning so dashboard shows real data.
+  // These were always 0/'neutral'/'waiting' since they were never updated.
+  aiSystem.currentReasoning.winRate = winRate;
+  aiSystem.currentReasoning.confidence = Math.round(
+    Math.min(100, closed.length * 2)  // confidence grows with trade count, caps at 100
+  );
+  aiSystem.currentReasoning.trend = avgPnL > 2 ? 'bullish' : avgPnL < -2 ? 'bearish' : 'neutral';
+  aiSystem.currentReasoning.nextAction =
+    winRate > 0.55 ? 'increase position size' :
+    winRate < 0.40 ? 'reduce exposure' :
+    getCurrentMarket() ? 'scanning for signals' : 'waiting for market open';
 }
  
 // ─── MARKET TRANSITION ──────────────────────────────────────────────────────
@@ -780,7 +888,11 @@ function evaluateAndTrade() {
   // FIXED BUG #2: Now 3 real checks are performed
   riskSystem.riskLevel = riskSystem.checksPassing.length === 3 ? 'normal' : 'elevated';
   if (riskSystem.riskLevel === 'elevated') {
-    console.log(`[RISK] Elevated - passing: [${riskSystem.checksPassing.join(', ')}] | drawdown ${(riskSystem.currentDrawdown*100).toFixed(1)}% | heat ${(riskSystem.portfolioHeat*100).toFixed(1)}% | dailyLoss ${(dailyLossPct*100).toFixed(1)}%`);
+    const nowRisk = Date.now();
+    if (nowRisk - evaluateAndTrade._lastRiskLog > 60000) {
+      evaluateAndTrade._lastRiskLog = nowRisk;
+      console.log(`[RISK] Elevated - passing: [${riskSystem.checksPassing.join(', ')}] | drawdown ${(riskSystem.currentDrawdown*100).toFixed(1)}% | heat ${(riskSystem.portfolioHeat*100).toFixed(1)}% | dailyLoss ${(dailyLossPct*100).toFixed(1)}%`);
+    }
     return;
   }
  
@@ -798,16 +910,36 @@ function evaluateAndTrade() {
     const momentum = (quote.price - quote.prevClose) / quote.prevClose;
     const sentiment = sentimentData.byMarket[market] || 0.5;
  
-    if (momentum > 0.005 && sentiment > 0.45) {
+    // FIXED NO-TRADING BUG: Thresholds were 0.5% — most stocks only move
+    // 0.1-0.3% on a normal day so signals almost never fired.
+    // Lowered to 0.1% (0.001) which fires on normal daily price movement.
+    if (momentum > 0.001 && sentiment > 0.45) {
       const reason = `Momentum +${(momentum*100).toFixed(2)}% | Sentiment ${sentiment.toFixed(2)}`;
-      if (executeLong(symbol, quote.price, reason)) return;
+      if (executeLong(symbol, quote.price, reason)) {
+        console.log(`[SIGNAL] LONG ${symbol}: momentum ${(momentum*100).toFixed(2)}% sentiment ${sentiment.toFixed(2)}`);
+        return;
+      }
     }
-    if (momentum < -0.005 && sentiment < 0.55) {
+    if (momentum < -0.001 && sentiment < 0.55) {
       const reason = `Momentum ${(momentum*100).toFixed(2)}% | Sentiment ${sentiment.toFixed(2)}`;
-      if (executeShort(symbol, quote.price, reason)) return;
+      if (executeShort(symbol, quote.price, reason)) {
+        console.log(`[SIGNAL] SHORT ${symbol}: momentum ${(momentum*100).toFixed(2)}% sentiment ${sentiment.toFixed(2)}`);
+        return;
+      }
     }
   }
+ 
+  // Log why no trade fired (throttled to once per minute to avoid spam)
+  const now = Date.now();
+  if (now - evaluateAndTrade._lastScanLog > 60000) {
+    evaluateAndTrade._lastScanLog = now;
+    const priceCount = Object.keys(marketData).length;
+    const openCount = Object.keys(portfolio.longPositions).length + Object.keys(portfolio.shortPositions).length;
+    console.log(`[SCAN] ${market} | Prices: ${priceCount} | Open: ${openCount}/5 | Cash: $${portfolio.cash.toFixed(2)} | Risk: ${riskSystem.riskLevel} | Checked ${symbols.length} symbols`);
+  }
 }
+evaluateAndTrade._lastScanLog = 0;
+evaluateAndTrade._lastRiskLog = 0;
  
 // ─── SENTIMENT ──────────────────────────────────────────────────────────────
 // FIXED BUG #6: Per-market sentiment is no longer pure random noise.
@@ -885,7 +1017,8 @@ app.get('/api/portfolio', (req, res) => {
     // FIXED BUG #7: Coerce to Number before toFixed — restored trades may have
     // string fields if loaded from an older backup schema.
     const entryP = Number(t.entryPrice) || 0;
-    const liveP = Number(marketData[t.ticker]?.price || t.entryPrice) || 0;
+    const livePrice = marketData[t.ticker]?.price;
+    const liveP = (livePrice && livePrice > 0) ? livePrice : (Number(t.entryPrice) || 0);
     let unrealPnL = 0;
     if (t.status === 'open') {
       unrealPnL = t.direction === 'LONG' ? (liveP - entryP) * t.qty : (entryP - liveP) * t.qty;
@@ -907,6 +1040,8 @@ app.get('/api/portfolio', (req, res) => {
   const totalClosed = closed.length;
   const winRate = totalClosed > 0 ? ((wins / totalClosed) * 100).toFixed(1) : '0.0';
  
+  const openTradeCount = portfolio.trades.filter(t => t.status === 'open').length;
+ 
   res.json({
     cash: cash.toFixed(2),
     totalValue: totalValue.toFixed(2),
@@ -915,8 +1050,8 @@ app.get('/api/portfolio', (req, res) => {
     positions,
     recentTrades,
     stats: {
-      totalTrades: portfolio.trades.filter(t => t.status === 'open').length + totalClosed,
-      openTrades: portfolio.trades.filter(t => t.status === 'open').length,
+      totalTrades: openTradeCount + totalClosed,
+      openTrades: openTradeCount,
       closedTrades: totalClosed,
       wins, losses: totalClosed - wins,
       winRatePercent: winRate + '%',
@@ -985,16 +1120,103 @@ app.listen(PORT, async () => {
   // 5. FIXED BUG #2: Reset daily realized loss at calendar midnight, not uptime+24h
   scheduleDailyReset();
  
-  // 6. Refresh prevClose every 6 hours — FIXED BUG #3: skip weekends and
-  // after-hours entirely; prices don't change then and the calls waste quota.
+  // 6. Refresh prevClose every 6 hours — skip after-hours and non-trading times.
+  // Mirror getCurrentMarket's logic exactly so JSX Sunday evening is included.
   setInterval(() => {
-    const { day } = getEasternTimeParts();
-    if (day !== 0 && day !== 6) {   // 0 = Sunday, 6 = Saturday
+    const { hours, day } = getEasternTimeParts();
+    // BUG #3 FIX: day === 0 (Sunday) before 7 PM is still Saturday in Tokyo —
+    // no JSX session yet. Must use the same isSundayEarlyMorning guard as
+    // getCurrentMarket, not a flat 'day === 0' weekend block.
+    const isSundayEarlyMorning = day === 0 && hours < JSX_HOURS.start;
+    const isRealWeekend = day === 6 || isSundayEarlyMorning;  // Sat + Sun before 7 PM
+    const isUSSession = hours >= 8 && hours < 17;
+    const isJPSession = hours >= 18 || hours < 3;
+    if (!isRealWeekend && (isUSSession || isJPSession)) {
       fetchInitialPrices();
     } else {
-      console.log('[PRICES] Skipping refresh — weekend, no price changes');
+      console.log('[PRICES] Skipping refresh — market closed');
     }
   }, 21600000);
  
   console.log('[STARTUP] ✓ All systems active\n');
+ 
+  // DIAGNOSTIC: After prices load, log momentum signals so Railway logs show
+  // exactly why trades are or aren't firing.
+  setTimeout(() => {
+    // Re-evaluate market at this moment (not captured from startup)
+    const diagMarket = getCurrentMarket();
+    console.log(`[DIAG] Market: ${diagMarket || 'CLOSED'} | Prices loaded: ${Object.keys(marketData).length}`);
+ 
+    if (diagMarket) {
+      const diagSymbols = diagMarket === 'jsx'
+        ? WATCHLISTS.jsx
+        : [...WATCHLISTS.nasdaq, ...WATCHLISTS.nyse];
+ 
+      let signalCount = 0;
+      diagSymbols.forEach(symbol => {
+        const q = marketData[symbol];
+        if (!q || !q.price || !q.prevClose) return;
+        const mom = ((q.price - q.prevClose) / q.prevClose * 100).toFixed(3);
+        const dir = parseFloat(mom) > 0.1 ? '▲ LONG candidate'
+                  : parseFloat(mom) < -0.1 ? '▼ SHORT candidate' : '  flat';
+        console.log(`[DIAG] ${symbol}: $${q.price.toFixed(2)} (${mom}%) ${dir}`);
+        if (Math.abs(parseFloat(mom)) > 0.1) signalCount++;
+      });
+      console.log(`[DIAG] ${signalCount}/${diagSymbols.length} symbols have qualifying momentum (>0.1%)`);
+    }
+ 
+    // FORCE TRADE: If no position/trade exists 2 minutes after startup, pick
+    // the stock with highest absolute momentum and force one trade.
+    // FIXED BUG #2: Respects risk checks before executing.
+    // FIXED BUG #3: Re-evaluates getCurrentMarket() at execution time (t=120s),
+    //               not the stale closure captured at t=35s.
+    setTimeout(() => {
+      const openCount = Object.keys(portfolio.longPositions).length
+                      + Object.keys(portfolio.shortPositions).length;
+      // FIX: Only check openCount and closedTrades. portfolio.trades.length is
+      // always > 0 after loadState() restores any backup — it was blocking the
+      // force trade on every single redeployment, even when intended to fire.
+      // openCount covers live positions; closedTrades covers trade history.
+      if (openCount > 0 || portfolio.closedTrades.length > 0) {
+        console.log('[FORCE] Skipped — already have trades or history');
+        return;
+      }
+ 
+      // FIXED BUG #2: honour risk gate before forcing
+      if (riskSystem.riskLevel === 'elevated') {
+        console.log('[FORCE] Skipped — risk level elevated');
+        return;
+      }
+ 
+      // FIXED BUG #3: fresh market lookup at t=120s
+      const forceMarket = getCurrentMarket();
+      if (!forceMarket) {
+        console.log('[FORCE] Skipped — market closed at execution time');
+        return;
+      }
+ 
+      const forceSymbols = forceMarket === 'jsx'
+        ? WATCHLISTS.jsx
+        : [...WATCHLISTS.nasdaq, ...WATCHLISTS.nyse];
+ 
+      let best = null, bestMom = 0;
+      forceSymbols.forEach(symbol => {
+        const q = marketData[symbol];
+        if (!q || !q.price) return;
+        const mom = q.prevClose ? (q.price - q.prevClose) / q.prevClose : 0;
+        if (Math.abs(mom) > Math.abs(bestMom)) { best = symbol; bestMom = mom; }
+      });
+ 
+      if (best && marketData[best]?.price) {
+        const price = marketData[best].price;
+        const direction = bestMom >= 0 ? 'LONG' : 'SHORT';
+        console.log(`[FORCE] Forcing ${direction} ${best} @ $${price.toFixed(2)} (momentum ${(bestMom*100).toFixed(2)}%)`);
+        if (direction === 'LONG') executeLong(best, price, 'Force initial trade (highest momentum)');
+        else executeShort(best, price, 'Force initial trade (highest magnitude momentum)');
+      } else {
+        console.log('[FORCE] Skipped — no real prices available');
+      }
+    }, 120000); // inner timer: fires 120s after the outer timer (total ~155s from startup)
+  }, 35000); // outer timer: fires ~35s after startup (after price fetch completes)
 });
+ 
